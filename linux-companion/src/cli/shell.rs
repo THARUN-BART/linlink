@@ -12,7 +12,9 @@ pub async fn run_shell(_device_filter: Option<String>) {
         Some(d) if d.state == "connected" => d,
         _ => {
             eprintln!("\n  ⚠️  No active LinLink device is currently connected.");
-            eprintln!("      Run `linlink pair` and scan the QR code from the LinLink app first.\n");
+            eprintln!(
+                "      Run `linlink pair` and scan the QR code from the LinLink app first.\n"
+            );
             return;
         }
     };
@@ -44,7 +46,10 @@ pub async fn run_shell(_device_filter: Option<String>) {
             println!("  🟢 Connected to Android file agent successfully!\n");
         }
         _ => {
-            println!("  🟡 Warning: Android file agent at http://{}:{} is not responding.", client_ip, agent_port);
+            println!(
+                "  🟡 Warning: Android file agent at http://{}:{} is not responding.",
+                client_ip, agent_port
+            );
             println!("     Make sure the LinLink app is open on your Android phone.\n");
         }
     }
@@ -53,7 +58,10 @@ pub async fn run_shell(_device_filter: Option<String>) {
 
     loop {
         // Display prompt
-        print!("  \x1b[1;36m📱 {}\x1b[0m \x1b[1;33m[{}]\x1b[0m > ", device_name, current_dir);
+        print!(
+            "  \x1b[1;36m📱 {}\x1b[0m \x1b[1;33m[{}]\x1b[0m > ",
+            device_name, current_dir
+        );
         let _ = io::stdout().flush();
 
         let mut input = String::new();
@@ -151,7 +159,15 @@ pub async fn run_shell(_device_filter: Option<String>) {
                             .unwrap_or_else(|| "uploaded_file".into())
                     };
 
-                    handle_put(&client, &base_url, &token, &local_path, &current_dir, &remote_filename).await;
+                    handle_put(
+                        &client,
+                        &base_url,
+                        &token,
+                        &local_path,
+                        &current_dir,
+                        &remote_filename,
+                    )
+                    .await;
                 }
             }
 
@@ -196,7 +212,10 @@ pub async fn run_shell(_device_filter: Option<String>) {
             }
 
             other => {
-                println!("    Unknown command: '{}'. Type 'help' for available commands.", other);
+                println!(
+                    "    Unknown command: '{}'. Type 'help' for available commands.",
+                    other
+                );
             }
         }
     }
@@ -239,83 +258,115 @@ async fn verify_dir(
     token: &str,
     path: &str,
 ) -> bool {
-    let url = format!("{}/fs/list?token={}&path={}", base_url, token, url_encode(path));
+    let url = format!(
+        "{}/fs/list?token={}&path={}",
+        base_url,
+        token,
+        url_encode(path)
+    );
     match client.get(&url).send().await {
         Ok(res) => res.status() == 200,
         Err(_) => false,
     }
 }
+fn wrap_str(s: &str, width: usize) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    chars
+        .chunks(width)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
+}
 
-async fn handle_ls(
-    client: &reqwest_compat::Client,
-    base_url: &str,
-    token: &str,
-    path: &str,
-) {
-    let url = format!("{}/fs/list?token={}&path={}", base_url, token, url_encode(path));
+async fn handle_ls(client: &reqwest_compat::Client, base_url: &str, token: &str, path: &str) {
+    let url = format!(
+        "{}/fs/list?token={}&path={}",
+        base_url,
+        token,
+        url_encode(path)
+    );
     match client.get(&url).send().await {
-        Ok(res) if res.status() == 200 => {
-            match res.json::<serde_json::Value>().await {
-                Ok(json) => {
-                    if let Some(err_msg) = json.get("message").and_then(|m| m.as_str()) {
-                        if json.get("status").and_then(|s| s.as_str()) == Some("error") {
-                            println!("    ❌ Android Message: {}", err_msg);
-                            if json.get("permission_needed").and_then(|p| p.as_bool()) == Some(true) {
-                                println!("    ⚠️  Please open the LinLink app on your phone and tap 'Grant All Files / Storage Access'.\n");
-                            }
-                            return;
+        Ok(res) if res.status() == 200 => match res.json::<serde_json::Value>().await {
+            Ok(json) => {
+                if let Some(err_msg) = json.get("message").and_then(|m| m.as_str()) {
+                    if json.get("status").and_then(|s| s.as_str()) == Some("error") {
+                        println!("    ❌ Android Message: {}", err_msg);
+                        if json.get("permission_needed").and_then(|p| p.as_bool()) == Some(true) {
+                            println!(
+                                "    ⚠️  Please open the LinLink app on your phone and tap 'Grant All Files / Storage Access'.\n"
+                            );
                         }
-                    }
-
-                    if let Some(entries) = json.get("entries").and_then(|e| e.as_array()) {
-                        if entries.is_empty() {
-                            println!("    Listing: \x1b[1m{}\x1b[0m\n", path);
-                            println!("    (Directory is empty)\n");
-                            return;
-                        }
-
-                        println!("    Listing: \x1b[1m{}\x1b[0m ({} items)\n", path, entries.len());
-                        println!("    {:<5} {:<32} {:>10}   {}", "TYPE", "NAME", "SIZE", "MODIFIED");
-                        println!("    ──────────────────────────────────────────────────────────────────");
-                        for entry in entries {
-                            let name = entry["name"].as_str().unwrap_or("");
-                            let is_dir = entry["is_dir"].as_bool().unwrap_or(false);
-                            let size = entry["size"].as_u64().unwrap_or(0);
-                            let modified = entry["modified"].as_str().unwrap_or("-");
-
-                            if is_dir {
-                                println!(
-                                    "    \x1b[1;34m{:<5}\x1b[0m \x1b[1;36m{:<32}\x1b[0m {:>10}   {}",
-                                    "DIR",
-                                    truncate_str(name, 32),
-                                    "-",
-                                    modified
-                                );
-                            } else {
-                                println!(
-                                    "    {:<5} {:<32} {:>10}   {}",
-                                    "FILE",
-                                    truncate_str(name, 32),
-                                    format_bytes(size),
-                                    modified
-                                );
-                            }
-                        }
-                        println!();
                         return;
                     }
-                    println!("    (No entries found for {})", path);
                 }
-                Err(e) => {
-                    println!("    ❌ Failed to parse response from Android: {}", e);
+
+                if let Some(entries) = json.get("entries").and_then(|e| e.as_array()) {
+                    if entries.is_empty() {
+                        println!("    Listing: \x1b[1m{}\x1b[0m\n", path);
+                        println!("    (Directory is empty)\n");
+                        return;
+                    }
+
+                    println!(
+                        "    Listing: \x1b[1m{}\x1b[0m ({} items)\n",
+                        path,
+                        entries.len()
+                    );
+                    println!(
+                        "    {:<5} {:<32} {:>10}   {}",
+                        "TYPE", "NAME", "SIZE", "MODIFIED"
+                    );
+                    println!(
+                        "    ──────────────────────────────────────────────────────────────────"
+                    );
+                    for entry in entries {
+                        let name = entry["name"].as_str().unwrap_or("");
+                        let is_dir = entry["is_dir"].as_bool().unwrap_or(false);
+                        let size = entry["size"].as_u64().unwrap_or(0);
+                        let modified = entry["modified"].as_str().unwrap_or("-");
+
+                        let name_lines = wrap_str(name, 32);
+
+                        for (i, line) in name_lines.iter().enumerate() {
+                            if i == 0 {
+                                if is_dir {
+                                    println!(
+                                        "    \x1b[1;34m{:<5}\x1b[0m \x1b[1;36m{:<32}\x1b[0m {:>10}   {}",
+                                        "DIR", line, "-", modified
+                                    );
+                                } else {
+                                    println!(
+                                        "    {:<5} {:<32} {:>10}   {}",
+                                        "FILE",
+                                        line,
+                                        format_bytes(size),
+                                        modified
+                                    );
+                                }
+                            } else {
+                                println!("    {:<5} {:<32}", "", line);
+                            }
+                        }
+                    }
+                    println!();
+                    return;
                 }
+                println!("    (No entries found for {})", path);
             }
-        }
+            Err(e) => {
+                println!("    ❌ Failed to parse response from Android: {}", e);
+            }
+        },
         Ok(res) => {
-            println!("    ❌ Failed to list files (HTTP {}). Check permissions on Android.", res.status());
+            println!(
+                "    ❌ Failed to list files (HTTP {}). Check permissions on Android.",
+                res.status()
+            );
         }
         Err(e) => {
-            println!("    ❌ Connection error: {}. Ensure LinLink app is running on phone.", e);
+            println!(
+                "    ❌ Connection error: {}. Ensure LinLink app is running on phone.",
+                e
+            );
         }
     }
 }
@@ -328,7 +379,12 @@ async fn handle_get(
     local_dest: &Path,
 ) {
     println!("    ⬇️  Downloading '{}' over TCP...", remote_path);
-    let url = format!("{}/fs/download?token={}&path={}", base_url, token, url_encode(remote_path));
+    let url = format!(
+        "{}/fs/download?token={}&path={}",
+        base_url,
+        token,
+        url_encode(remote_path)
+    );
 
     match client.get(&url).send().await {
         Ok(res) if res.status() == 200 => {
@@ -350,7 +406,10 @@ async fn handle_get(
                 println!("    ❌ Failed to read data stream from Android.");
             }
         }
-        Ok(res) => println!("    ❌ Download failed (HTTP {}). File may not exist.", res.status()),
+        Ok(res) => println!(
+            "    ❌ Download failed (HTTP {}). File may not exist.",
+            res.status()
+        ),
         Err(e) => println!("    ❌ Network error: {}", e),
     }
 }
@@ -390,7 +449,10 @@ async fn handle_put(
         Ok(res) if res.status() == 200 => {
             println!("    ✅ Upload complete: {}/{}", remote_dir, remote_filename);
         }
-        Ok(res) => println!("    ❌ Upload failed (HTTP {}). Check Android storage permissions.", res.status()),
+        Ok(res) => println!(
+            "    ❌ Upload failed (HTTP {}). Check Android storage permissions.",
+            res.status()
+        ),
         Err(e) => println!("    ❌ Network error: {}", e),
     }
 }
@@ -401,7 +463,12 @@ async fn handle_cat(
     token: &str,
     remote_path: &str,
 ) {
-    let url = format!("{}/fs/download?token={}&path={}", base_url, token, url_encode(remote_path));
+    let url = format!(
+        "{}/fs/download?token={}&path={}",
+        base_url,
+        token,
+        url_encode(remote_path)
+    );
     match client.get(&url).send().await {
         Ok(res) if res.status() == 200 => {
             if let Ok(bytes) = res.bytes().await {
@@ -412,7 +479,10 @@ async fn handle_cat(
                     }
                     println!("    ──────────────────────────────\n");
                 } else {
-                    println!("    ⚠️  File appears to be binary ({} bytes). Cannot print.", bytes.len());
+                    println!(
+                        "    ⚠️  File appears to be binary ({} bytes). Cannot print.",
+                        bytes.len()
+                    );
                 }
             }
         }
@@ -421,13 +491,13 @@ async fn handle_cat(
     }
 }
 
-async fn handle_mkdir(
-    client: &reqwest_compat::Client,
-    base_url: &str,
-    token: &str,
-    path: &str,
-) {
-    let url = format!("{}/fs/mkdir?token={}&path={}", base_url, token, url_encode(path));
+async fn handle_mkdir(client: &reqwest_compat::Client, base_url: &str, token: &str, path: &str) {
+    let url = format!(
+        "{}/fs/mkdir?token={}&path={}",
+        base_url,
+        token,
+        url_encode(path)
+    );
     match client.post(&url).send().await {
         Ok(res) if res.status() == 200 => {
             println!("    ✅ Created directory: {}", path);
@@ -437,13 +507,13 @@ async fn handle_mkdir(
     }
 }
 
-async fn handle_rm(
-    client: &reqwest_compat::Client,
-    base_url: &str,
-    token: &str,
-    path: &str,
-) {
-    let url = format!("{}/fs/delete?token={}&path={}", base_url, token, url_encode(path));
+async fn handle_rm(client: &reqwest_compat::Client, base_url: &str, token: &str, path: &str) {
+    let url = format!(
+        "{}/fs/delete?token={}&path={}",
+        base_url,
+        token,
+        url_encode(path)
+    );
     match client.post(&url).send().await {
         Ok(res) if res.status() == 200 => {
             println!("    ✅ Removed: {}", path);
@@ -494,7 +564,13 @@ fn truncate_str(s: &str, max: usize) -> String {
 fn url_encode(s: &str) -> String {
     let mut encoded = String::new();
     for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' || b == b'/' {
+        if b.is_ascii_alphanumeric()
+            || b == b'-'
+            || b == b'_'
+            || b == b'.'
+            || b == b'~'
+            || b == b'/'
+        {
             encoded.push(b as char);
         } else {
             encoded.push_str(&format!("%{:02X}", b));
@@ -564,13 +640,11 @@ pub mod reqwest_compat {
                 format!("{}:80", host_port)
             };
 
-            let mut stream = tokio::time::timeout(
-                Duration::from_secs(5),
-                TcpStream::connect(&addr),
-            )
-            .await
-            .map_err(|_| "Connection timed out".to_string())?
-            .map_err(|e| format!("Failed to connect to {}: {}", addr, e))?;
+            let mut stream =
+                tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(&addr))
+                    .await
+                    .map_err(|_| "Connection timed out".to_string())?
+                    .map_err(|e| format!("Failed to connect to {}: {}", addr, e))?;
 
             let header = format!(
                 "{} {} HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -644,7 +718,9 @@ pub mod reqwest_compat {
             500
         };
 
-        let is_chunked = header_str.to_lowercase().contains("transfer-encoding: chunked");
+        let is_chunked = header_str
+            .to_lowercase()
+            .contains("transfer-encoding: chunked");
         let decoded_body = if is_chunked {
             decode_chunked_body(&body_bytes)
         } else {

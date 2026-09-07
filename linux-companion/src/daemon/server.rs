@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Query, State},
+    extract::{ConnectInfo, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tracing::info;
 
 use crate::storage::{ActiveSession, Storage, current_timestamp};
@@ -22,6 +22,9 @@ pub struct DaemonServerState {
     pub token: String,
     pub device_name: String,
     pub shutdown_tx: mpsc::Sender<()>,
+    pub last_synced_clipboard: Arc<Mutex<String>>,
+    pub client_ip: Arc<Mutex<Option<String>>>,
+    pub agent_port: Arc<Mutex<Option<u16>>>,
 }
 
 #[derive(Serialize)]
@@ -92,16 +95,22 @@ async fn handle_ping() -> Json<serde_json::Value> {
 
 async fn handle_device_register(
     State(state): State<Arc<DaemonServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<DeviceRegisterRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if body.token != state.token {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    let detected_ip = addr.ip().to_string();
+    *state.client_ip.lock().await = Some(detected_ip.clone());
+    *state.agent_port.lock().await = body.agent_port;
+
     if let Some(mut session) = Storage::load_session() {
         session.agent_port = body.agent_port;
+        session.client_ip = Some(detected_ip.clone());
         Storage::save_session(&session);
-        info!("Updated active session with Android agent_port: {:?}", body.agent_port);
+        info!("Updated active session with Android agent_port: {:?} and IP: {}", body.agent_port, detected_ip);
     }
 
     Ok(Json(serde_json::json!({
@@ -110,7 +119,23 @@ async fn handle_device_register(
     })))
 }
 
-async fn handle_get_clipboard() -> Json<serde_json::Value> {
+async fn handle_get_clipboard(
+    State(state): State<Arc<DaemonServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Json<serde_json::Value> {
+    // Keep client IP fresh
+    *state.client_ip.lock().await = Some(addr.ip().to_string());
+
+    if let Some(sys_clip) = read_system_clipboard() {
+        if !sys_clip.is_empty() {
+            let mut last = state.last_synced_clipboard.lock().await;
+            if *last != sys_clip {
+                *last = sys_clip.clone();
+                Storage::save_clipboard(&sys_clip);
+            }
+        }
+    }
+
     let text = Storage::load_clipboard().unwrap_or_default();
     Json(serde_json::json!({
         "status": "ok",
@@ -120,17 +145,22 @@ async fn handle_get_clipboard() -> Json<serde_json::Value> {
 
 async fn handle_post_clipboard(
     State(state): State<Arc<DaemonServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<ClipboardPayload>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if body.token != state.token {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    // Keep client IP fresh
+    *state.client_ip.lock().await = Some(addr.ip().to_string());
+
     info!(
         "Received clipboard update from '{}' ({} chars)",
         state.device_name,
         body.text.len()
     );
+    *state.last_synced_clipboard.lock().await = body.text.clone();
     Storage::save_clipboard(&body.text);
     copy_to_system_clipboard(&body.text);
 
@@ -339,7 +369,7 @@ async fn handle_fs_upload(
     })))
 }
 
-fn copy_to_system_clipboard(text: &str) {
+pub fn copy_to_system_clipboard(text: &str) {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -373,6 +403,83 @@ fn copy_to_system_clipboard(text: &str) {
     }
 }
 
+pub fn read_system_clipboard() -> Option<String> {
+    use std::process::Command;
+
+    // 1. Attempt wl-paste for Wayland
+    if let Ok(output) = Command::new("wl-paste").arg("-n").output() {
+        if output.status.success() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                return Some(s);
+            }
+        }
+    }
+
+    // 2. Attempt xclip for X11
+    if let Ok(output) = Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                return Some(s);
+            }
+        }
+    }
+
+    // 3. Attempt xsel for X11
+    if let Ok(output) = Command::new("xsel")
+        .args(["--clipboard", "--output"])
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                return Some(s);
+            }
+        }
+    }
+
+    None
+}
+
+pub async fn push_clipboard_to_android(
+    ip: &str,
+    port: u16,
+    token: &str,
+    text: &str,
+) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpStream;
+
+    let payload = serde_json::json!({
+        "token": token,
+        "text": text,
+    })
+    .to_string();
+
+    let addr = format!("{}:{}", ip, port);
+    let mut stream = tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        TcpStream::connect(&addr),
+    )
+    .await
+    .map_err(|_| "Connect timeout".to_string())?
+    .map_err(|e| format!("Connect error: {}", e))?;
+
+    let req = format!(
+        "POST /fs/clipboard HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        addr,
+        payload.len(),
+        payload
+    );
+
+    stream
+        .write_all(req.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 async fn handle_unlink(
     State(state): State<Arc<DaemonServerState>>,
     Json(body): Json<DaemonUnlinkRequest>,
@@ -402,6 +509,14 @@ pub async fn run_daemon_server(
     );
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+    let (clip_stop_tx, mut clip_stop_rx) = mpsc::channel::<()>(1);
+
+    let initial_clip = read_system_clipboard()
+        .or_else(Storage::load_clipboard)
+        .unwrap_or_default();
+    let last_synced_clipboard = Arc::new(Mutex::new(initial_clip));
+    let client_ip_shared = Arc::new(Mutex::new(client_ip.clone()));
+    let agent_port_shared = Arc::new(Mutex::new(None));
 
     let state = Arc::new(DaemonServerState {
         session_id: session_id.clone(),
@@ -410,7 +525,57 @@ pub async fn run_daemon_server(
         token: token.clone(),
         device_name: device_name.clone(),
         shutdown_tx,
+        last_synced_clipboard: Arc::clone(&last_synced_clipboard),
+        client_ip: Arc::clone(&client_ip_shared),
+        agent_port: Arc::clone(&agent_port_shared),
     });
+
+    // Spawn live background clipboard sync worker
+    let clipboard_worker = {
+        let last_clipboard = Arc::clone(&last_synced_clipboard);
+        let client_ip_shared = Arc::clone(&client_ip_shared);
+        let agent_port_shared = Arc::clone(&agent_port_shared);
+        let token = token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(800));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Some(current_clip) = read_system_clipboard() {
+                            if !current_clip.is_empty() {
+                                let mut last = last_clipboard.lock().await;
+                                if *last != current_clip {
+                                    *last = current_clip.clone();
+                                    Storage::save_clipboard(&current_clip);
+                                    info!(
+                                        "📋 Linux clipboard changed ({} chars), syncing to Android...",
+                                        current_clip.len()
+                                    );
+
+                                    let maybe_ip = client_ip_shared.lock().await.clone();
+                                    let maybe_port = *agent_port_shared.lock().await;
+
+                                    if let (Some(ip), Some(port)) = (maybe_ip, maybe_port) {
+                                        let token = token.clone();
+                                        let clip_text = current_clip.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(e) = push_clipboard_to_android(&ip, port, &token, &clip_text).await {
+                                                tracing::debug!("Could not push clipboard to Android ({}:{}): {}", ip, port, e);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ = clip_stop_rx.recv() => {
+                        tracing::debug!("Clipboard sync worker stopped.");
+                        break;
+                    }
+                }
+            }
+        })
+    };
 
     let app = Router::new()
         .route("/status", get(handle_status))
@@ -431,6 +596,7 @@ pub async fn run_daemon_server(
         Ok(l) => l,
         Err(e) => {
             tracing::error!("Failed to bind daemon listener on {}: {}", addr, e);
+            let _ = clip_stop_tx.send(()).await;
             return;
         }
     };
@@ -481,6 +647,9 @@ pub async fn run_daemon_server(
             info!("Shutdown signal received via HTTP.");
         }
     }
+
+    let _ = clip_stop_tx.send(()).await;
+    let _ = clipboard_worker.await;
 
     // Cleanup session and record disconnect
     Storage::record_device_disconnected(&device_name);

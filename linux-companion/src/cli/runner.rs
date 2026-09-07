@@ -81,9 +81,12 @@ pub fn run() {
         Commands::Clipboard { text } => {
             if let Some(t) = text {
                 Storage::save_clipboard(&t);
-                println!("\n  📋 Saved to LinLink shared clipboard ({} chars):\n     \"{}\"\n", t.len(), t);
+                crate::daemon::server::copy_to_system_clipboard(&t);
+                println!("\n  📋 Saved to LinLink shared & system clipboard ({} chars):\n     \"{}\"\n", t.len(), t);
             } else {
-                match Storage::load_clipboard() {
+                let current = crate::daemon::server::read_system_clipboard()
+                    .or_else(Storage::load_clipboard);
+                match current {
                     Some(content) if !content.is_empty() => {
                         println!("\n  📋 Current LinLink shared clipboard:\n     \"{}\"\n", content);
                     }

@@ -13,7 +13,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   PairedCompanion? _pairedCompanion;
   bool _isCheckingStatus = false;
   bool _hasStoragePermission = false;
@@ -24,7 +24,30 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ClipboardService.onClipboardSynced = (text) {
+      if (mounted) {
+        setState(() => _lastSyncedClipboard = text);
+      }
+    };
     _checkStorage();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ClipboardService.stopAutoSync();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkStorage();
+      if (_pairedCompanion != null) {
+        ClipboardService.syncNow(_pairedCompanion!);
+      }
+    }
   }
 
   Future<void> _checkStorage() async {
@@ -239,6 +262,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirm != true) return;
 
+    ClipboardService.stopAutoSync();
     await AndroidFileAgent.stopServer();
     await PairingService.unlink(_pairedCompanion!);
 
@@ -336,13 +360,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 _pairedCompanion = companion;
               });
               await AndroidFileAgent.startServer(companion: companion);
+              ClipboardService.startAutoSync(companion);
               if (!mounted) return;
               _checkStorage();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   backgroundColor: Colors.teal.shade800,
                   content: Text(
-                    '🎉 Successfully linked to ${companion.baseUrl}!',
+                    '🎉 Successfully linked to ${companion.baseUrl}! Live clipboard sync active.',
                   ),
                 ),
               );
@@ -619,6 +644,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildClipboardSyncCard() {
+    final isAutoSync = ClipboardService.isAutoSyncRunning;
+
     return Card(
       elevation: 0,
       color: Colors.white.withAlpha(12),
@@ -631,20 +658,91 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.content_paste, color: Colors.cyanAccent, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Shared Clipboard 📋',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                const Row(
+                  children: [
+                    Icon(Icons.content_paste, color: Colors.cyanAccent, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Shared Clipboard 📋',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isAutoSync ? Colors.teal.shade900 : Colors.grey.shade800,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isAutoSync ? Colors.tealAccent : Colors.white24,
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isAutoSync ? Colors.greenAccent : Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isAutoSync ? 'Live Sync ON' : 'Paused',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isAutoSync ? Colors.greenAccent : Colors.white60,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Copy text seamlessly between Android and Linux.',
-              style: TextStyle(fontSize: 12, color: Colors.white70),
+            Text(
+              isAutoSync
+                  ? '⚡ Automatically syncing clipboard bidirectionally until connection stops.'
+                  : 'Automatic clipboard sync is currently paused.',
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Continuous Auto-Sync',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  Switch(
+                    value: isAutoSync,
+                    activeThumbColor: Colors.tealAccent,
+                    onChanged: (val) {
+                      setState(() {
+                        if (val && _pairedCompanion != null) {
+                          ClipboardService.startAutoSync(_pairedCompanion!);
+                        } else {
+                          ClipboardService.stopAutoSync();
+                        }
+                      });
+                    },
+                  ),
+                ],
+              ),
             ),
             if (_lastSyncedClipboard.isNotEmpty) ...[
               const SizedBox(height: 10),

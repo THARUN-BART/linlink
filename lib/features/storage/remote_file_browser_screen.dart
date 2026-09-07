@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:android_file_picker/android_file_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:file_picker_linux/file_picker_linux.dart';
 import 'package:flutter/material.dart';
 import '../pairing/pairing_service.dart';
 
@@ -153,7 +156,322 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
     }
   }
 
-  Future<void> _showUploadDialog() async {
+  Future<void> _pickAndUploadFiles() async {
+    // Explicitly ensure the platform picker implementation is registered
+    if (Platform.isAndroid) {
+      try {
+        FilePickerAndroid.registerWith();
+      } catch (_) {}
+    } else if (Platform.isLinux) {
+      try {
+        FilePickerLinux.registerWith();
+      } catch (_) {}
+    }
+
+    List<PlatformFile> files = [];
+    try {
+      files = await FilePicker.pickFiles(
+        type: FileType.any,
+      );
+    } catch (e) {
+      debugPrint('FilePicker error: $e. Falling back to local storage file picker...');
+      await _showLocalDeviceFilePicker();
+      return;
+    }
+
+    if (files.isEmpty) {
+      return; // User cancelled file manager selection
+    }
+
+    int successCount = 0;
+    final total = files.length;
+
+    for (int i = 0; i < total; i++) {
+      final platformFile = files[i];
+      final filename = platformFile.name;
+      final fileSize = await platformFile.length();
+      final sizeStr = _formatBytes(fileSize);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.cyanAccent,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  total > 1
+                      ? 'Uploading (${i + 1}/$total) "$filename" ($sizeStr)...'
+                      : 'Uploading "$filename" ($sizeStr) to Linux...',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final success = await _uploadSingleFile(platformFile, fileSize);
+      if (success) {
+        successCount++;
+      }
+    }
+
+    if (!mounted) return;
+
+    if (successCount == total) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.teal.shade800,
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.greenAccent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  total == 1
+                      ? '✅ "${files.first.name}" uploaded to Linux!'
+                      : '✅ Successfully uploaded $total files to Linux!',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.orange.shade900,
+          content: Text(
+            '⚠️ Uploaded $successCount of $total files. Some files failed to upload.',
+          ),
+        ),
+      );
+    }
+
+    _loadDirectory(_currentPath.isEmpty ? null : _currentPath);
+  }
+
+  Future<void> _showLocalDeviceFilePicker() async {
+    String currentLocalPath = '/storage/emulated/0';
+    if (!Directory(currentLocalPath).existsSync()) {
+      currentLocalPath = Directory.current.path;
+    }
+
+    final selectedFile = await showModalBottomSheet<File>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final dir = Directory(currentLocalPath);
+            List<FileSystemEntity> entities = [];
+            try {
+              if (dir.existsSync()) {
+                entities = dir.listSync()
+                  ..sort((a, b) {
+                    final aIsDir = a is Directory;
+                    final bIsDir = b is Directory;
+                    if (aIsDir != bIsDir) return aIsDir ? -1 : 1;
+                    return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+                  });
+              }
+            } catch (_) {}
+
+            return FractionallySizedBox(
+              heightFactor: 0.85,
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(
+                      border: Border(bottom: BorderSide(color: Colors.white12)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.folder, color: Colors.cyanAccent),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Select File from Device',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            if (dir.parent.path != dir.path)
+                              IconButton(
+                                icon: const Icon(Icons.arrow_upward, size: 20),
+                                tooltip: 'Up one folder',
+                                onPressed: () {
+                                  setModalState(() {
+                                    currentLocalPath = dir.parent.path;
+                                  });
+                                },
+                              ),
+                            Expanded(
+                              child: Text(
+                                currentLocalPath,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white70,
+                                  fontFamily: 'monospace',
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: entities.isEmpty
+                        ? const Center(child: Text('No files found in directory'))
+                        : ListView.builder(
+                            itemCount: entities.length,
+                            itemBuilder: (context, index) {
+                              final item = entities[index];
+                              final isDirectory = item is Directory;
+                              final name = item.uri.pathSegments.where((s) => s.isNotEmpty).last;
+
+                              if (name.startsWith('.')) return const SizedBox.shrink();
+
+                              return ListTile(
+                                leading: Icon(
+                                  isDirectory ? Icons.folder : Icons.insert_drive_file,
+                                  color: isDirectory ? Colors.amber : Colors.cyanAccent,
+                                ),
+                                title: Text(name, style: const TextStyle(fontSize: 14)),
+                                onTap: () {
+                                  if (isDirectory) {
+                                    setModalState(() {
+                                      currentLocalPath = item.path;
+                                    });
+                                  } else if (item is File) {
+                                    Navigator.pop(context, item);
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (selectedFile != null) {
+      final filename = selectedFile.uri.pathSegments.last;
+      final fileSize = await selectedFile.length();
+      final sizeStr = _formatBytes(fileSize);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Uploading "$filename" ($sizeStr) to Linux...'),
+        ),
+      );
+
+      final success = await _uploadRawFile(selectedFile);
+      if (!mounted) return;
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.teal.shade800,
+            content: Text('✅ "$filename" uploaded to Linux!'),
+          ),
+        );
+        _loadDirectory(_currentPath.isEmpty ? null : _currentPath);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade800,
+            content: Text('❌ Upload failed for "$filename"'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _uploadRawFile(File file) async {
+    final filename = file.uri.pathSegments.last;
+    final uploadUri = Uri.parse(
+      '${widget.companion.baseUrl}/api/fs/upload?token=${widget.companion.token}&dest_dir=${Uri.encodeComponent(_currentPath)}&filename=${Uri.encodeComponent(filename)}',
+    );
+
+    final client = HttpClient()..connectionTimeout = const Duration(minutes: 5);
+
+    try {
+      final req = await client.postUrl(uploadUri);
+      req.headers.contentType = ContentType.binary;
+      req.contentLength = await file.length();
+      await file.openRead().cast<List<int>>().pipe(req);
+      final res = await req.close();
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error uploading raw file $filename: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _uploadSingleFile(PlatformFile platformFile, int fileSize) async {
+    final filename = platformFile.name;
+    final uploadUri = Uri.parse(
+      '${widget.companion.baseUrl}/api/fs/upload?token=${widget.companion.token}&dest_dir=${Uri.encodeComponent(_currentPath)}&filename=${Uri.encodeComponent(filename)}',
+    );
+
+    final client = HttpClient()..connectionTimeout = const Duration(minutes: 5);
+
+    try {
+      final req = await client.postUrl(uploadUri);
+      req.headers.contentType = ContentType.binary;
+      req.contentLength = fileSize;
+
+      if (platformFile.path != null && File(platformFile.path!).existsSync()) {
+        final localFile = File(platformFile.path!);
+        await localFile.openRead().cast<List<int>>().pipe(req);
+      } else {
+        await platformFile.readAsByteStream().cast<List<int>>().pipe(req);
+      }
+
+      final res = await req.close();
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error uploading $filename: $e');
+      return false;
+    }
+  }
+
+  Future<void> _showCreateNoteDialog() async {
     final nameController = TextEditingController(
       text: 'note_${DateTime.now().millisecondsSinceEpoch}.txt',
     );
@@ -165,7 +483,7 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Upload File to Linux ⬆️'),
+        title: const Text('Create Text Note on Linux 📝'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -202,7 +520,7 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
           ),
           FilledButton.icon(
             icon: const Icon(Icons.upload),
-            label: const Text('Upload over TCP'),
+            label: const Text('Create File'),
             onPressed: () => Navigator.of(ctx).pop(true),
           ),
         ],
@@ -231,7 +549,7 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.teal.shade800,
-            content: Text('✅ Uploaded "$filename" to Linux!'),
+            content: Text('✅ Created "$filename" on Linux!'),
           ),
         );
         _loadDirectory(_currentPath);
@@ -262,6 +580,11 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
         title: const Text('Linux Files 💻'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.note_add_outlined),
+            tooltip: 'Create Text Note',
+            onPressed: _showCreateNoteDialog,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
             onPressed: () => _loadDirectory(_currentPath.isEmpty ? null : _currentPath),
@@ -273,7 +596,7 @@ class _RemoteFileBrowserScreenState extends State<RemoteFileBrowserScreen> {
         foregroundColor: Colors.white,
         icon: const Icon(Icons.upload_file),
         label: const Text('Upload to Linux'),
-        onPressed: _showUploadDialog,
+        onPressed: _pickAndUploadFiles,
       ),
       body: Column(
         children: [

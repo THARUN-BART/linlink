@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../clipboard/clipboard_service.dart';
 import '../pairing/pairing_service.dart';
 
 /// Lightweight HTTP/TCP file server running on Android to serve files
@@ -120,6 +121,10 @@ class AndroidFileAgent {
 
         case '/fs/delete':
           await _handleDelete(request);
+          break;
+
+        case '/fs/clipboard':
+          await _handleClipboard(request, expectedToken);
           break;
 
         default:
@@ -358,6 +363,38 @@ class AndroidFileAgent {
       }
       await _writeJson(request.response, {'status': 'ok', 'deleted': path});
     } catch (e) {
+      await _writeJson(request.response, {
+        'status': 'error',
+        'message': e.toString(),
+      }, status: HttpStatus.internalServerError);
+    }
+  }
+
+  static Future<void> _handleClipboard(HttpRequest request, String expectedToken) async {
+    try {
+      final body = await utf8.decoder.bind(request).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final text = data['text'] as String?;
+      final token = data['token'] as String?;
+
+      if (token != null && token != expectedToken) {
+        request.response
+          ..statusCode = HttpStatus.unauthorized
+          ..write('Unauthorized');
+        await request.response.close();
+        return;
+      }
+
+      if (text != null && text.isNotEmpty) {
+        await ClipboardService.applyIncomingClipboard(text);
+      }
+
+      await _writeJson(request.response, {
+        'status': 'ok',
+        'message': 'Clipboard updated on Android',
+      });
+    } catch (e) {
+      debugPrint('Error handling clipboard push on Android: $e');
       await _writeJson(request.response, {
         'status': 'error',
         'message': e.toString(),
