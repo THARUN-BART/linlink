@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    linux_companion::cli::run();
 }

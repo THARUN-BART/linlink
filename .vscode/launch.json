@@ -1,0 +1,77 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug LinLink (Pair - Foreground)",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=linlink",
+          "--package=linux-companion"
+        ],
+        "filter": {
+          "name": "linlink",
+          "kind": "bin"
+        }
+      },
+      "args": ["pair", "--foreground", "--debug"],
+      "cwd": "${workspaceFolder}/linux-companion"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug LinLink (Status)",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=linlink",
+          "--package=linux-companion"
+        ],
+        "filter": {
+          "name": "linlink",
+          "kind": "bin"
+        }
+      },
+      "args": ["status"],
+      "cwd": "${workspaceFolder}/linux-companion"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug LinLink (Devices)",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=linlink",
+          "--package=linux-companion"
+        ],
+        "filter": {
+          "name": "linlink",
+          "kind": "bin"
+        }
+      },
+      "args": ["devices"],
+      "cwd": "${workspaceFolder}/linux-companion"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug LinLink (Unit Tests)",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--package=linux-companion"
+        ],
+        "filter": {
+          "name": "linux-companion",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/linux-companion"
+    }
+  ]
+}

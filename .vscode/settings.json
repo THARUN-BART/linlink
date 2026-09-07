@@ -1,0 +1,12 @@
+{
+  "rust-analyzer.server.path": "/home/bart-simpson/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rust-analyzer",
+  "rust-analyzer.linkedProjects": [
+    "./linux-companion/Cargo.toml"
+  ],
+  "rust-analyzer.check.command": "check",
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cargo.buildScripts.enable": true,
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.trace.server": "verbose"
+}

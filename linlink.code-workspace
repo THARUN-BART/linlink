@@ -1,0 +1,17 @@
+{
+  "folders": [
+    {
+      "name": "Flutter App",
+      "path": "."
+    },
+    {
+      "name": "Rust Companion",
+      "path": "linux-companion"
+    }
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": [
+      "./linux-companion/Cargo.toml"
+    ]
+  }
+}
