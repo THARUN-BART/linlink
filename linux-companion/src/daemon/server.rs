@@ -1,7 +1,9 @@
 use axum::{
     Json, Router,
-    extract::State,
-    http::StatusCode,
+    body::Bytes,
+    extract::{Query, State},
+    http::{StatusCode, header},
+    response::IntoResponse,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,31 @@ pub struct FileUploadPayload {
     pub content: String,
 }
 
+#[derive(Deserialize)]
+pub struct FsListRequest {
+    pub token: String,
+    pub path: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct FsDownloadQuery {
+    pub token: String,
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct FsUploadQuery {
+    pub token: String,
+    pub dest_dir: Option<String>,
+    pub filename: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeviceRegisterRequest {
+    pub token: String,
+    pub agent_port: Option<u16>,
+}
+
 async fn handle_status(State(state): State<Arc<DaemonServerState>>) -> Json<DaemonStatusResponse> {
     Json(DaemonStatusResponse {
         status: "ok".to_string(),
@@ -61,6 +88,26 @@ async fn handle_status(State(state): State<Arc<DaemonServerState>>) -> Json<Daem
 
 async fn handle_ping() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "pong" }))
+}
+
+async fn handle_device_register(
+    State(state): State<Arc<DaemonServerState>>,
+    Json(body): Json<DeviceRegisterRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    if let Some(mut session) = Storage::load_session() {
+        session.agent_port = body.agent_port;
+        Storage::save_session(&session);
+        info!("Updated active session with Android agent_port: {:?}", body.agent_port);
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "message": "Device agent registered",
+    })))
 }
 
 async fn handle_get_clipboard() -> Json<serde_json::Value> {
@@ -147,6 +194,151 @@ async fn handle_file_upload(
     Err(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+/// Lists Linux files for the Android app to explore
+async fn handle_fs_list(
+    State(state): State<Arc<DaemonServerState>>,
+    Json(body): Json<FsListRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let requested_path = body.path.unwrap_or_else(|| home.clone());
+    let path = std::path::PathBuf::from(&requested_path);
+
+    if !path.exists() || !path.is_dir() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let parent_path = path.parent().map(|p| p.to_string_lossy().to_string());
+    let mut entries = Vec::new();
+
+    if let Ok(dir_entries) = std::fs::read_dir(&path) {
+        for entry in dir_entries.filter_map(|e| e.ok()) {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            // Skip hidden files starting with '.' unless directly requested
+            if file_name.starts_with('.') {
+                continue;
+            }
+
+            if let Ok(meta) = entry.metadata() {
+                let is_dir = meta.is_dir();
+                let size = if is_dir { 0 } else { meta.len() };
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                entries.push(serde_json::json!({
+                    "name": file_name,
+                    "is_dir": is_dir,
+                    "size": size,
+                    "modified": modified,
+                }));
+            }
+        }
+    }
+
+    // Sort: directories first, then alphabetical
+    entries.sort_by(|a, b| {
+        let a_dir = a["is_dir"].as_bool().unwrap_or(false);
+        let b_dir = b["is_dir"].as_bool().unwrap_or(false);
+        if a_dir != b_dir {
+            b_dir.cmp(&a_dir)
+        } else {
+            a["name"].as_str().cmp(&b["name"].as_str())
+        }
+    });
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "current_path": path.to_string_lossy(),
+        "parent_path": parent_path,
+        "home_path": home,
+        "transfers_path": Storage::transfers_dir().to_string_lossy(),
+        "entries": entries,
+    })))
+}
+
+/// Download a file from Linux to Android over TCP
+async fn handle_fs_download(
+    State(state): State<Arc<DaemonServerState>>,
+    Query(query): Query<FsDownloadQuery>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if query.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let path = std::path::PathBuf::from(&query.path);
+    if !path.exists() || !path.is_file() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let file_bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let filename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "download".into());
+
+    let headers = [
+        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+        (
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", filename),
+        ),
+    ];
+
+    Ok((headers, file_bytes))
+}
+
+/// Upload a file from Android to a specific directory on Linux over TCP
+async fn handle_fs_upload(
+    State(state): State<Arc<DaemonServerState>>,
+    Query(query): Query<FsUploadQuery>,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if query.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let dest_dir = if let Some(ref d) = query.dest_dir {
+        std::path::PathBuf::from(d)
+    } else {
+        Storage::transfers_dir()
+    };
+
+    let _ = std::fs::create_dir_all(&dest_dir);
+
+    let safe_name = std::path::Path::new(&query.filename)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "uploaded_file".to_string());
+
+    let dest_file = dest_dir.join(&safe_name);
+    tokio::fs::write(&dest_file, &body)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    info!(
+        "Saved uploaded file from device '{}' to: {}",
+        state.device_name,
+        dest_file.display()
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "message": format!("File saved to {}", dest_file.display()),
+        "path": dest_file.to_string_lossy(),
+        "bytes_received": body.len(),
+    })))
+}
+
 fn copy_to_system_clipboard(text: &str) {
     use std::io::Write;
     use std::process::{Command, Stdio};
@@ -226,7 +418,12 @@ pub async fn run_daemon_server(
         .route("/clipboard", get(handle_get_clipboard).post(handle_post_clipboard))
         .route("/files", get(handle_list_files))
         .route("/files/upload", post(handle_file_upload))
+        .route("/api/device/register", post(handle_device_register))
+        .route("/api/fs/list", post(handle_fs_list))
+        .route("/api/fs/download", get(handle_fs_download))
+        .route("/api/fs/upload", post(handle_fs_upload))
         .route("/pair/unlink", post(handle_unlink))
+        .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024 * 1024))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -247,6 +444,7 @@ pub async fn run_daemon_server(
         state: "connected".to_string(),
         device_name: Some(device_name.clone()),
         client_ip: client_ip.clone(),
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&session);

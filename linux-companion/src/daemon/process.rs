@@ -99,6 +99,7 @@ impl DaemonProcess {
             state: "connected".to_string(),
             device_name: Some(device_name.to_string()),
             client_ip: client_ip.map(|s| s.to_string()),
+            agent_port: None,
             started_at: current_timestamp(),
         };
         Storage::save_session(&active);
@@ -111,46 +112,57 @@ impl DaemonProcess {
     /// Stops the currently running session, optionally ensuring it matches `device_filter`.
     pub fn stop(device_filter: Option<&str>) -> StopOutcome {
         let session = match Storage::load_session() {
-            Some(s) if Storage::is_pid_alive(s.pid) => s,
+            Some(s) if Storage::is_pid_alive(s.pid) => Some(s),
             Some(_) => {
                 // PID is dead, clear stale session
                 Storage::clear_session();
-                return Self::handle_no_active_session(device_filter);
+                None
             }
-            None => return Self::handle_no_active_session(device_filter),
+            None => None,
         };
 
-        let active_name = session
-            .device_name
-            .clone()
-            .unwrap_or_else(|| "Unknown Device".to_string());
+        if let Some(session) = session {
+            let active_name = session
+                .device_name
+                .clone()
+                .unwrap_or_else(|| "Unknown Device".to_string());
 
-        // If a device filter was provided, verify it matches
-        if let Some(filter) = device_filter {
-            let filter_lower = filter.trim().to_lowercase();
-            let active_lower = active_name.trim().to_lowercase();
+            // If a device filter was provided, verify it matches
+            if let Some(filter) = device_filter {
+                let filter_lower = filter.trim().to_lowercase();
+                let active_lower = active_name.trim().to_lowercase();
 
-            if !active_lower.contains(&filter_lower) && !filter_lower.contains(&active_lower) {
-                return StopOutcome::DeviceMismatch {
-                    active_device: active_name,
-                    requested_device: filter.to_string(),
-                };
+                if !active_lower.contains(&filter_lower) && !filter_lower.contains(&active_lower) {
+                    return StopOutcome::DeviceMismatch {
+                        active_device: active_name,
+                        requested_device: filter.to_string(),
+                    };
+                }
             }
+
+            // Send SIGTERM to the daemon process
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(session.pid.to_string())
+                .status();
+
+            for _ in 0..20 {
+                if !Storage::is_pid_alive(session.pid) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+
+            Storage::record_device_disconnected(&active_name);
+            Storage::clear_session();
+
+            return StopOutcome::Stopped {
+                device_name: active_name,
+                pid: session.pid,
+            };
         }
 
-        // Send SIGTERM to the daemon process
-        let _ = Command::new("kill")
-            .arg("-TERM")
-            .arg(session.pid.to_string())
-            .status();
-
-        Storage::record_device_disconnected(&active_name);
-        Storage::clear_session();
-
-        StopOutcome::Stopped {
-            device_name: active_name,
-            pid: session.pid,
-        }
+        Self::handle_no_active_session(device_filter)
     }
 
     fn handle_no_active_session(device_filter: Option<&str>) -> StopOutcome {

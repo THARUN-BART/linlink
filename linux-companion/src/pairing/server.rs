@@ -95,6 +95,7 @@ async fn handle_scan(
         state: "waiting".to_string(),
         device_name: None,
         client_ip: None,
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&session);
@@ -144,6 +145,7 @@ async fn handle_handshake(
         state: "connected".to_string(),
         device_name: Some(body.device_name.clone()),
         client_ip: client_ip.clone(),
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&session);
@@ -210,7 +212,7 @@ pub async fn start(
     port: u16,
     session_id: String,
     token: String,
-) -> (tokio::task::JoinHandle<()>, mpsc::UnboundedReceiver<PairingEvent>) {
+) -> Result<(tokio::task::JoinHandle<()>, mpsc::UnboundedReceiver<PairingEvent>), std::io::Error> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<PairingEvent>();
 
     let shared = Arc::new(AppState {
@@ -230,20 +232,17 @@ pub async fn start(
         .with_state(shared);
 
     let addr = format!("{}:{}", bind_host, port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("failed to bind pairing server");
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("Pairing server listening on http://{}", addr);
 
     let handle = tokio::spawn(async move {
-        axum::serve(
+        let _ = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .await
-        .expect("pairing server error");
+        .await;
     });
 
-    (handle, event_rx)
+    Ok((handle, event_rx))
 }

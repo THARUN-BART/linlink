@@ -54,6 +54,12 @@ pub enum Commands {
         device: Option<String>,
     },
 
+    /// Open interactive terminal to explore and transfer files with connected Android phone
+    Shell {
+        /// Optional device name to connect to
+        device: Option<String>,
+    },
+
     /// View logs from the background daemon
     Logs {
         /// Number of lines to view

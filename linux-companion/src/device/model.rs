@@ -25,6 +25,8 @@ pub struct ActiveSession {
     pub device_name: Option<String>,
     #[serde(default)]
     pub client_ip: Option<String>,
+    #[serde(default)]
+    pub agent_port: Option<u16>,
     pub started_at: String,
 }
 
@@ -40,4 +42,5 @@ pub struct CurrentDevice {
     pub pid: u32,
     pub connected_at: String,
     pub client_ip: Option<String>,
+    pub agent_port: Option<u16>,
 }

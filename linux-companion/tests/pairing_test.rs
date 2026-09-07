@@ -43,7 +43,9 @@ async fn test_pairing_server_lifecycle() {
     let token = session.token.clone();
 
     let (_handle, mut event_rx) =
-        server::start("127.0.0.1", "127.0.0.1", port, session.id.clone(), token.clone()).await;
+        server::start("127.0.0.1", "127.0.0.1", port, session.id.clone(), token.clone())
+            .await
+            .expect("failed to start pairing server");
 
     // Small yield to let server bind
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

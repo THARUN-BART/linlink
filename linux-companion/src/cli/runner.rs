@@ -66,6 +66,14 @@ pub fn run() {
             run_stop(device.as_deref());
         }
 
+        Commands::Shell { device } => {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime")
+                .block_on(crate::cli::shell::run_shell(device));
+        }
+
         Commands::Logs { lines, follow } => {
             run_logs(lines, follow);
         }
@@ -136,13 +144,23 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
         && Storage::is_pid_alive(existing.pid)
     {
         eprintln!(
-            "\n  ⚠️  An active LinLink session is already running (PID: {}).\n      Run `linlink stop` first or stop the running process.\n",
+            "\n  ⚠️  An active LinLink session is already running (PID: {}).\n      Run `linlink stop` first or connect with `linlink shell`.\n",
             existing.pid
         );
         return;
-    } else {
-        Storage::clear_session();
     }
+
+    // Check if an orphaned LinLink daemon is running
+    let daemon_pids = Storage::find_running_daemon_pids();
+    if !daemon_pids.is_empty() {
+        eprintln!(
+            "\n  ⚠️  An active LinLink daemon is already running in the background (PID: {}).\n      Run `linlink shell` to connect, or `linlink stop` to stop it.\n",
+            daemon_pids[0]
+        );
+        return;
+    }
+
+    Storage::clear_session();
 
     let advertised_host = if host == "0.0.0.0" {
         detect_local_ip().unwrap_or_else(|| "127.0.0.1".into())
@@ -152,6 +170,32 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
 
     let session = PairingSession::new(advertised_host.clone(), port);
     let qr_data = PairingQr::from_session(&session);
+    let token = session.token.clone();
+    let session_id = session.id.clone();
+
+    let (handle, mut event_rx) = match server::start(
+        "0.0.0.0",
+        &advertised_host,
+        port,
+        session_id.clone(),
+        token.clone(),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
+            eprintln!(
+                "\n  ❌ Cannot bind pairing server to port {}: Address already in use.\n      💡 Another process or a background LinLink daemon is using this port.\n         • Connect to current session:  linlink shell\n         • Stop the existing session:   linlink stop\n         • Or choose another port:      linlink pair --port {}\n",
+                port,
+                port + 2
+            );
+            return;
+        }
+        Err(err) => {
+            eprintln!("\n  ❌ Failed to start pairing server: {}\n", err);
+            return;
+        }
+    };
 
     let active_session = ActiveSession {
         pid: std::process::id(),
@@ -161,6 +205,7 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
         state: "pairing".to_string(),
         device_name: None,
         client_ip: None,
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&active_session);
@@ -175,11 +220,6 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
         "\n  Session expires in 5 minutes.\n  Listening on http://{}:{}\n",
         advertised_host, port
     );
-
-    let token = session.token.clone();
-    let session_id = session.id.clone();
-    let (handle, mut event_rx) =
-        server::start("0.0.0.0", &advertised_host, port, session_id.clone(), token.clone()).await;
 
     let mut is_connected = false;
 
@@ -222,10 +262,12 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
                                     println!("  🟢  LinLink is now running in the background (PID: {}).", pid);
                                     println!("  📄  Log output: {}", Storage::log_file().display());
                                     println!("\n  Available commands:");
-                                    println!("    • View status:      `linlink status`");
-                                    println!("    • View all devices: `linlink devices`");
-                                    println!("    • View live logs:   `linlink logs -f`");
-                                    println!("    • Stop connection:  `linlink stop \"{}\"`\n", device_name);
+                                    println!("    • Interactive shell:  `linlink shell`");
+                                    println!("    • View status:        `linlink status`");
+                                    println!("    • View all devices:   `linlink devices`");
+                                    println!("    • Shared clipboard:   `linlink clipboard`");
+                                    println!("    • View live logs:     `linlink logs -f`");
+                                    println!("    • Stop connection:    `linlink stop \"{}\"`\n", device_name);
                                     return;
                                 }
                                 Err(e) => {
@@ -287,8 +329,21 @@ fn run_stop(device_filter: Option<&str>) {
             println!("      Run `linlink devices` to list known devices.\n");
         }
         StopOutcome::NotRunning => {
-            println!("  ℹ️  LinLink is not currently running.");
-            println!("      Run `linlink pair` to start a new pairing session.\n");
+            let daemon_pids = Storage::find_running_daemon_pids();
+            if !daemon_pids.is_empty() {
+                for pid in &daemon_pids {
+                    let _ = StdCommand::new("kill")
+                        .arg("-TERM")
+                        .arg(pid.to_string())
+                        .status();
+                }
+                Storage::clear_session();
+                println!("  🛑 Stopped {} orphaned LinLink background daemon(s).", daemon_pids.len());
+                println!("  ✅ LinLink connection closed cleanly.\n");
+            } else {
+                println!("  ℹ️  LinLink is not currently running.");
+                println!("      Run `linlink pair` to start a new pairing session.\n");
+            }
         }
     }
 }

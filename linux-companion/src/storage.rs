@@ -184,6 +184,28 @@ impl Storage {
         }
         true
     }
+
+    pub fn find_running_daemon_pids() -> Vec<u32> {
+        let mut pids = Vec::new();
+        let my_pid = std::process::id();
+        if let Ok(entries) = fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                if let Ok(file_name) = entry.file_name().into_string() {
+                    if let Ok(pid) = file_name.parse::<u32>() {
+                        if pid == my_pid {
+                            continue;
+                        }
+                        if let Ok(cmdline) = fs::read_to_string(format!("/proc/{}/cmdline", pid)) {
+                            if cmdline.contains("linlink") && cmdline.contains("daemon") {
+                                pids.push(pid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        pids
+    }
 }
 
 pub fn current_timestamp() -> String {

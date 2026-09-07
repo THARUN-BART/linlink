@@ -39,6 +39,7 @@ impl DeviceManager {
             pid: session.pid,
             connected_at: session.started_at.clone(),
             client_ip: session.client_ip.or_else(|| matched.and_then(|d| d.ip.clone())),
+            agent_port: session.agent_port,
         })
     }
 

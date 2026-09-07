@@ -40,6 +40,7 @@ fn test_active_session_serialization() {
         state: "connected".to_string(),
         device_name: Some("Android Phone".to_string()),
         client_ip: Some("192.168.1.88".to_string()),
+        agent_port: Some(7879),
         started_at: "2026-09-07 14:00:00 UTC".to_string(),
     };
 

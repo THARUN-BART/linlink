@@ -1,5 +1,6 @@
 pub mod args;
 pub mod runner;
+pub mod shell;
 pub mod ui;
 
 pub use args::{Cli, Commands};

@@ -48,6 +48,7 @@ fn test_device_manager_past_and_current() {
         state: "connected".to_string(),
         device_name: Some("Samsung Galaxy S24".to_string()),
         client_ip: Some("192.168.1.60".to_string()),
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&session);
@@ -109,6 +110,7 @@ fn test_daemon_stop_device_matching() {
         state: "connected".to_string(),
         device_name: Some("Motorola Edge".to_string()),
         client_ip: None,
+        agent_port: None,
         started_at: current_timestamp(),
     };
     Storage::save_session(&session);
