@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../clipboard/clipboard_service.dart';
 import '../pairing/pairing_service.dart';
 import '../scanner/views/scanner_screen.dart';
+import '../storage/file_agent.dart';
+import '../storage/remote_file_browser_screen.dart';
 import '../storage/storage_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -237,6 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirm != true) return;
 
+    await AndroidFileAgent.stopServer();
     await PairingService.unlink(_pairedCompanion!);
 
     if (mounted) {
@@ -332,6 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() {
                 _pairedCompanion = companion;
               });
+              await AndroidFileAgent.startServer(companion: companion);
+              if (!mounted) return;
               _checkStorage();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -468,6 +473,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SizedBox(height: 16),
 
+        // 💻 Linux File Explorer Card
+        _buildLinuxFilesCard(),
+
+        const SizedBox(height: 16),
+
         // 📋 Clipboard Sync Card
         _buildClipboardSyncCard(),
 
@@ -543,6 +553,68 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildLinuxFilesCard() {
+    return Card(
+      elevation: 0,
+      color: Colors.white.withAlpha(12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Colors.cyan, width: 0.8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.computer, color: Colors.cyanAccent, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Explore Linux Files & Folders 💻',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Browse files on your Linux PC, view folders, and transfer files between them directly over TCP.',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.cyan.shade800,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.folder_open, size: 20),
+                label: const Text(
+                  'Open Linux File Explorer',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                onPressed: () {
+                  if (_pairedCompanion == null) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => RemoteFileBrowserScreen(
+                        companion: _pairedCompanion!,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
