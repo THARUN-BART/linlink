@@ -19,6 +19,14 @@ void main() {
       expect(target.token, 'token999');
     });
 
+    test('parses JSON format pairing payload', () {
+      final target = PairingTarget.tryParse('{"host":"192.168.1.100","port":7878,"token":"sec123"}');
+      expect(target, isNotNull);
+      expect(target!.host, '192.168.1.100');
+      expect(target.port, 7878);
+      expect(target.token, 'sec123');
+    });
+
     test('returns null for invalid URI without token', () {
       final target = PairingTarget.tryParse('linlink://10.0.0.5:7878');
       expect(target, isNull);

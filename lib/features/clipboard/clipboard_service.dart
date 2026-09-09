@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../pairing/pairing_service.dart';
+import '../../services/foreground_sync_service.dart';
 
 class ClipboardService {
   static final HttpClient _client = HttpClient()
@@ -20,6 +21,9 @@ class ClipboardService {
   static void startAutoSync(PairedCompanion companion) {
     if (_syncTimer != null) return;
     debugPrint('⚡ Starting continuous clipboard sync with ${companion.baseUrl}');
+
+    // Start background Foreground Service with an ongoing notification
+    ForegroundSyncService.start(companion);
 
     // Seed with current device clipboard so we don't immediately treat it as new
     readDeviceClipboard().then((initial) {
@@ -52,6 +56,12 @@ class ClipboardService {
         if (success) {
           onClipboardSynced?.call(localText);
           debugPrint('📋 Pushed local clipboard to Linux (${localText.length} chars)');
+          final snippet = localText.trim().replaceAll('\n', ' ');
+          final preview = snippet.length > 35 ? '${snippet.substring(0, 35)}…' : snippet;
+          ForegroundSyncService.update(
+            title: 'LinLink: Copied to Linux',
+            text: '"$preview"',
+          );
         }
         return;
       }
@@ -65,6 +75,12 @@ class ClipboardService {
         await writeDeviceClipboard(remoteText);
         onClipboardSynced?.call(remoteText);
         debugPrint('📋 Pulled remote clipboard from Linux (${remoteText.length} chars)');
+        final snippet = remoteText.trim().replaceAll('\n', ' ');
+        final preview = snippet.length > 35 ? '${snippet.substring(0, 35)}…' : snippet;
+        ForegroundSyncService.update(
+          title: 'LinLink: Copied from Linux',
+          text: '"$preview"',
+        );
       }
     } catch (e) {
       debugPrint('Clipboard sync tick error: $e');
@@ -80,6 +96,12 @@ class ClipboardService {
     await writeDeviceClipboard(text);
     onClipboardSynced?.call(text);
     debugPrint('📋 Live TCP clipboard applied on Android (${text.length} chars)');
+    final snippet = text.trim().replaceAll('\n', ' ');
+    final preview = snippet.length > 35 ? '${snippet.substring(0, 35)}…' : snippet;
+    ForegroundSyncService.update(
+      title: 'LinLink: Live Sync Applied',
+      text: '"$preview"',
+    );
   }
 
   /// Stops continuous clipboard sync
@@ -88,6 +110,7 @@ class ClipboardService {
       _syncTimer?.cancel();
       _syncTimer = null;
       debugPrint('🛑 Stopped continuous clipboard sync');
+      ForegroundSyncService.stop();
     }
   }
 

@@ -12,11 +12,34 @@ class PairingTarget {
     required this.token,
   });
 
-  /// Parse URLs in format: linlink://HOST:PORT?t=TOKEN or http://HOST:PORT?t=TOKEN or HOST:PORT?t=TOKEN
   static PairingTarget? tryParse(String raw) {
     try {
       var trimmed = raw.trim();
       if (trimmed.isEmpty) return null;
+
+      // Handle JSON payload: {"host": "...", "port": 7878, "token": "..."}
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          final map = jsonDecode(trimmed) as Map<String, dynamic>;
+          final host = (map['host'] ?? map['ip'] ?? '') as String;
+          final port = (map['port'] as num?)?.toInt() ?? 7878;
+          final token = (map['token'] ?? map['t'] ?? '') as String;
+          if (host.isNotEmpty && token.isNotEmpty) {
+            return PairingTarget(host: host, port: port, token: token);
+          }
+        } catch (_) {}
+      }
+
+      // Handle plain colon separated HOST:PORT:TOKEN
+      final parts = trimmed.split(':');
+      if (parts.length == 3 && !trimmed.contains('/')) {
+        final host = parts[0].trim();
+        final port = int.tryParse(parts[1].trim()) ?? 7878;
+        final token = parts[2].trim();
+        if (host.isNotEmpty && token.isNotEmpty) {
+          return PairingTarget(host: host, port: port, token: token);
+        }
+      }
 
       if (!trimmed.contains('://')) {
         trimmed = 'linlink://$trimmed';

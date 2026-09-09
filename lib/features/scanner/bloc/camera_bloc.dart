@@ -12,10 +12,10 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
       : scannerController = scannerController ??
             MobileScannerController(
               autoStart: true,
-              detectionSpeed: DetectionSpeed.unrestricted,
-              detectionTimeoutMs: 50,
+              detectionSpeed: DetectionSpeed.noDuplicates,
+              detectionTimeoutMs: 250,
               facing: CameraFacing.back,
-              formats: const [BarcodeFormat.qrCode],
+              formats: const [],
               torchEnabled: false,
             ),
         super(const CameraState()) {
@@ -44,9 +44,6 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
         scannedData: null,
         errorMessage: null,
       ));
-      try {
-        await scannerController.start();
-      } catch (_) {}
     } else if (status.isPermanentlyDenied) {
       emit(state.copyWith(
         status: CameraStatus.permissionPermanentlyDenied,
@@ -107,7 +104,9 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
       errorMessage: null,
     ));
     try {
-      await scannerController.start();
+      if (!scannerController.value.isRunning && !scannerController.value.isStarting) {
+        await scannerController.start();
+      }
     } catch (_) {}
   }
 

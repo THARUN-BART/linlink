@@ -300,6 +300,36 @@ class _ScannerView extends StatelessWidget {
       children: [
         MobileScanner(
           controller: cameraBloc.scannerController,
+          errorBuilder: (context, error) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.videocam_off_outlined, size: 48, color: LinLinkColors.error),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Camera Initialisation Error',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: LinLinkColors.onSurface),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      error.errorDetails?.message ?? 'Could not initialize camera preview on this device.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.lan_outlined, size: 18),
+                      label: const Text('Enter Connection Manually'),
+                      onPressed: () => _showManualEntryDialog(context),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
           onDetect: (capture) {
             for (final barcode in capture.barcodes) {
               final raw = barcode.rawValue ?? barcode.displayValue;

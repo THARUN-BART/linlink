@@ -89,7 +89,14 @@ pub async fn run_shell(_device_filter: Option<String>) {
             }
 
             "clear" | "cls" => {
-                print!("\x1b[2J\x1b[1;1H");
+                // Clear both the visible viewport and the scrollback buffer (\x1b[3J)
+                // so the terminal does not push content up into hidden scrollback history.
+                if std::process::Command::new("clear").status().is_err() {
+                    print!("\x1b[H\x1b[2J\x1b[3J");
+                }
+                println!();
+                println!("  📱 LinLink Shell \x1b[1;30m(connected to {})\x1b[0m", device_name);
+                println!("  Type 'help' for commands, 'exit' to quit.\n");
                 let _ = io::stdout().flush();
             }
 
