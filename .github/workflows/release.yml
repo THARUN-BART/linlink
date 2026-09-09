@@ -143,10 +143,8 @@ jobs:
             ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
 
             VERSION="${GITHUB_REF_NAME#v}"
-            # Create remote version directory and sync release assets to SourceForge FRS
-            ssh $SF_USER@frs.sourceforge.net "mkdir -p /home/frs/project/$SF_PROJECT/v${VERSION}"
-            rsync -avz release_assets/ $SF_USER@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/v${VERSION}/
-            rsync -avz release_assets/ $SF_USER@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/
+            # Standard SCP batch upload directly into SourceForge project FRS directory
+            scp -r release_assets/* $SF_USER@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/
           else
             echo "SourceForge secrets not configured. Skipping SourceForge upload."
           fi
