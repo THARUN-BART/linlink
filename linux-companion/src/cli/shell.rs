@@ -95,7 +95,10 @@ pub async fn run_shell(_device_filter: Option<String>) {
                     print!("\x1b[H\x1b[2J\x1b[3J");
                 }
                 println!();
-                println!("  📱 LinLink Shell \x1b[1;30m(connected to {})\x1b[0m", device_name);
+                println!(
+                    "  📱 LinLink Shell \x1b[1;30m(connected to {})\x1b[0m",
+                    device_name
+                );
                 println!("  Type 'help' for commands, 'exit' to quit.\n");
                 let _ = io::stdout().flush();
             }
@@ -364,8 +367,12 @@ async fn handle_ls(client: &reqwest_compat::Client, base_url: &str, token: &str,
             }
         },
         Ok(res) if res.status() == 403 => {
-            println!("    🔒 Remote directory browsing is disabled on this phone (Privacy Mode enabled).");
-            println!("    💡 The phone user can share files directly to Linux using the LinLink app.\n");
+            println!(
+                "    🔒 Remote directory browsing is disabled on this phone (Privacy Mode enabled)."
+            );
+            println!(
+                "    💡 The phone user can share files directly to Linux using the LinLink app.\n"
+            );
         }
         Ok(res) => {
             println!(
@@ -418,7 +425,9 @@ async fn handle_get(
             }
         }
         Ok(res) if res.status() == 403 => {
-            println!("    🔒 Remote file access is disabled by the phone for privacy (Privacy Mode enabled).");
+            println!(
+                "    🔒 Remote file access is disabled by the phone for privacy (Privacy Mode enabled)."
+            );
             println!("    💡 Please share files directly from the LinLink mobile app.\n");
         }
         Ok(res) => println!(

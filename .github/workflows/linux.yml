@@ -4,16 +4,12 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: [main]
+    branches: [master]
 
 jobs:
   build-linux:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: linux-companion
 
     steps:
       - name: Checkout repository
@@ -23,10 +19,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Release Binary
-        run: cargo build --release --locked
+        run: |
+          cd linux-companion
+          cargo build --release --locked
 
       - name: Package Linux Tarball
         run: |
+          cd linux-companion
           mkdir -p release
 
           cp target/release/linlink release/

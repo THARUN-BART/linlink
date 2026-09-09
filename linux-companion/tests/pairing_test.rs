@@ -42,10 +42,15 @@ async fn test_pairing_server_lifecycle() {
     let session = PairingSession::new("127.0.0.1".to_string(), port);
     let token = session.token.clone();
 
-    let (_handle, mut event_rx) =
-        server::start("127.0.0.1", "127.0.0.1", port, session.id.clone(), token.clone())
-            .await
-            .expect("failed to start pairing server");
+    let (_handle, mut event_rx) = server::start(
+        "127.0.0.1",
+        "127.0.0.1",
+        port,
+        session.id.clone(),
+        token.clone(),
+    )
+    .await
+    .expect("failed to start pairing server");
 
     // Small yield to let server bind
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -59,7 +64,9 @@ async fn test_pairing_server_lifecycle() {
         scan_body
     );
 
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("failed to connect");
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("failed to connect");
     stream.write_all(scan_req.as_bytes()).await.unwrap();
     let mut resp = String::new();
     stream.read_to_string(&mut resp).await.unwrap();
@@ -78,7 +85,9 @@ async fn test_pairing_server_lifecycle() {
         hs_body
     );
 
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("failed to connect");
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("failed to connect");
     stream.write_all(hs_req.as_bytes()).await.unwrap();
     let mut resp = String::new();
     stream.read_to_string(&mut resp).await.unwrap();
@@ -98,7 +107,9 @@ async fn test_pairing_server_lifecycle() {
         "GET /status HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
         port
     );
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("failed to connect");
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("failed to connect");
     stream.write_all(status_req.as_bytes()).await.unwrap();
     let mut resp = String::new();
     stream.read_to_string(&mut resp).await.unwrap();

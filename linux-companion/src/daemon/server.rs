@@ -110,7 +110,10 @@ async fn handle_device_register(
         session.agent_port = body.agent_port;
         session.client_ip = Some(detected_ip.clone());
         Storage::save_session(&session);
-        info!("Updated active session with Android agent_port: {:?} and IP: {}", body.agent_port, detected_ip);
+        info!(
+            "Updated active session with Android agent_port: {:?} and IP: {}",
+            body.agent_port, detected_ip
+        );
     }
 
     Ok(Json(serde_json::json!({
@@ -495,7 +498,10 @@ pub async fn push_disconnect_to_android(ip: &str, port: u16, token: &str) {
     )
     .await
     else {
-        tracing::debug!("Could not reach Android agent at {} for disconnect notify", addr);
+        tracing::debug!(
+            "Could not reach Android agent at {} for disconnect notify",
+            addr
+        );
         return;
     };
 
@@ -610,7 +616,10 @@ pub async fn run_daemon_server(
     let app = Router::new()
         .route("/status", get(handle_status))
         .route("/ping", get(handle_ping))
-        .route("/clipboard", get(handle_get_clipboard).post(handle_post_clipboard))
+        .route(
+            "/clipboard",
+            get(handle_get_clipboard).post(handle_post_clipboard),
+        )
         .route("/files", get(handle_list_files))
         .route("/files/upload", post(handle_file_upload))
         .route("/api/device/register", post(handle_device_register))
@@ -618,7 +627,9 @@ pub async fn run_daemon_server(
         .route("/api/fs/download", get(handle_fs_download))
         .route("/api/fs/upload", post(handle_fs_upload))
         .route("/pair/unlink", post(handle_unlink))
-        .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024 * 1024))
+        .layer(axum::extract::DefaultBodyLimit::max(
+            10 * 1024 * 1024 * 1024,
+        ))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -685,7 +696,10 @@ pub async fn run_daemon_server(
     let maybe_ip = client_ip_shared.lock().await.clone();
     let maybe_agent_port = *agent_port_shared.lock().await;
     if let (Some(ip), Some(agent_port)) = (maybe_ip, maybe_agent_port) {
-        info!("Notifying Android agent at {}:{} about disconnect...", ip, agent_port);
+        info!(
+            "Notifying Android agent at {}:{} about disconnect...",
+            ip, agent_port
+        );
         push_disconnect_to_android(&ip, agent_port, &token).await;
     }
 

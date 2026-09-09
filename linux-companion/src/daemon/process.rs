@@ -8,10 +8,7 @@ use crate::storage::{Storage, current_timestamp};
 #[derive(Debug, PartialEq, Eq)]
 pub enum StopOutcome {
     /// The running session for the specified (or current) device was stopped.
-    Stopped {
-        device_name: String,
-        pid: u32,
-    },
+    Stopped { device_name: String, pid: u32 },
     /// LinLink was running, but connected to a different device.
     DeviceMismatch {
         active_device: String,
@@ -23,9 +20,7 @@ pub enum StopOutcome {
         last_disconnected: Option<String>,
     },
     /// The specified device was never paired.
-    DeviceNotFound {
-        requested_device: String,
-    },
+    DeviceNotFound { requested_device: String },
     /// No session is running.
     NotRunning,
 }

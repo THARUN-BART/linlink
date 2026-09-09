@@ -82,16 +82,25 @@ pub fn run() {
             if let Some(t) = text {
                 Storage::save_clipboard(&t);
                 crate::daemon::server::copy_to_system_clipboard(&t);
-                println!("\n  📋 Saved to LinLink shared & system clipboard ({} chars):\n     \"{}\"\n", t.len(), t);
+                println!(
+                    "\n  📋 Saved to LinLink shared & system clipboard ({} chars):\n     \"{}\"\n",
+                    t.len(),
+                    t
+                );
             } else {
-                let current = crate::daemon::server::read_system_clipboard()
-                    .or_else(Storage::load_clipboard);
+                let current =
+                    crate::daemon::server::read_system_clipboard().or_else(Storage::load_clipboard);
                 match current {
                     Some(content) if !content.is_empty() => {
-                        println!("\n  📋 Current LinLink shared clipboard:\n     \"{}\"\n", content);
+                        println!(
+                            "\n  📋 Current LinLink shared clipboard:\n     \"{}\"\n",
+                            content
+                        );
                     }
                     _ => {
-                        println!("\n  📋 Shared clipboard is currently empty.\n     Run `linlink clipboard \"text\"` to set content.\n");
+                        println!(
+                            "\n  📋 Shared clipboard is currently empty.\n     Run `linlink clipboard \"text\"` to set content.\n"
+                        );
                     }
                 }
             }
@@ -106,7 +115,11 @@ pub fn run() {
                     if let Ok(meta) = entry.metadata() {
                         if meta.is_file() {
                             count += 1;
-                            println!("    • {} ({} bytes)", entry.file_name().to_string_lossy(), meta.len());
+                            println!(
+                                "    • {} ({} bytes)",
+                                entry.file_name().to_string_lossy(),
+                                meta.len()
+                            );
                         }
                     }
                 }
@@ -315,15 +328,24 @@ fn run_stop(device_filter: Option<&str>) {
     println!();
     match DaemonProcess::stop(device_filter) {
         StopOutcome::Stopped { device_name, pid } => {
-            println!("  🛑 Stopped LinLink session for device '{}' (PID: {}).", device_name, pid);
+            println!(
+                "  🛑 Stopped LinLink session for device '{}' (PID: {}).",
+                device_name, pid
+            );
             println!("  ✅ LinLink connection closed cleanly.\n");
         }
         StopOutcome::DeviceMismatch {
             active_device,
             requested_device,
         } => {
-            println!("  ⚠️  Active session is connected to '{}', not '{}'.", active_device, requested_device);
-            println!("      To stop the active device, run: `linlink stop \"{}\"` or `linlink stop`.\n", active_device);
+            println!(
+                "  ⚠️  Active session is connected to '{}', not '{}'.",
+                active_device, requested_device
+            );
+            println!(
+                "      To stop the active device, run: `linlink stop \"{}\"` or `linlink stop`.\n",
+                active_device
+            );
         }
         StopOutcome::DeviceAlreadyDisconnected {
             device_name,
@@ -336,7 +358,10 @@ fn run_stop(device_filter: Option<&str>) {
             println!("      Run `linlink devices` to view all devices.\n");
         }
         StopOutcome::DeviceNotFound { requested_device } => {
-            println!("  ❌ Device '{}' was not found in active or past devices.", requested_device);
+            println!(
+                "  ❌ Device '{}' was not found in active or past devices.",
+                requested_device
+            );
             println!("      Run `linlink devices` to list known devices.\n");
         }
         StopOutcome::NotRunning => {
@@ -349,7 +374,10 @@ fn run_stop(device_filter: Option<&str>) {
                         .status();
                 }
                 Storage::clear_session();
-                println!("  🛑 Stopped {} orphaned LinLink background daemon(s).", daemon_pids.len());
+                println!(
+                    "  🛑 Stopped {} orphaned LinLink background daemon(s).",
+                    daemon_pids.len()
+                );
                 println!("  ✅ LinLink connection closed cleanly.\n");
             } else {
                 println!("  ℹ️  LinLink is not currently running.");
@@ -367,7 +395,10 @@ fn run_logs(lines: usize, follow: bool) {
     }
 
     if follow {
-        println!("  Streaming logs from {} (Ctrl+C to stop)...", log_path.display());
+        println!(
+            "  Streaming logs from {} (Ctrl+C to stop)...",
+            log_path.display()
+        );
         let _ = StdCommand::new("tail")
             .arg("-f")
             .arg("-n")
@@ -379,7 +410,11 @@ fn run_logs(lines: usize, follow: bool) {
         let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
         let start = all_lines.len().saturating_sub(lines);
 
-        println!("\n  📄 LinLink Log Output (last {} lines from {}):\n", lines, log_path.display());
+        println!(
+            "\n  📄 LinLink Log Output (last {} lines from {}):\n",
+            lines,
+            log_path.display()
+        );
         for line in &all_lines[start..] {
             println!("    {}", line);
         }

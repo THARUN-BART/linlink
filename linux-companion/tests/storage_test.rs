@@ -1,4 +1,4 @@
-use linux_companion::storage::{current_timestamp, ActiveSession, PairedDevice, Storage};
+use linux_companion::storage::{ActiveSession, PairedDevice, Storage, current_timestamp};
 
 #[test]
 fn test_current_timestamp_format() {
@@ -25,7 +25,10 @@ fn test_paired_device_serialization() {
     assert_eq!(decoded.id, "unique-uuid");
     assert_eq!(decoded.name, "Google Pixel 8");
     assert_eq!(decoded.token, "87654321");
-    assert_eq!(decoded.last_seen.as_deref(), Some("2026-09-07 14:05:00 UTC"));
+    assert_eq!(
+        decoded.last_seen.as_deref(),
+        Some("2026-09-07 14:05:00 UTC")
+    );
     assert_eq!(decoded.disconnected_at, None);
     assert_eq!(decoded.ip.as_deref(), Some("192.168.1.55"));
 }

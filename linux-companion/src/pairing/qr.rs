@@ -71,9 +71,9 @@ impl PairingQr {
                 let top = dark(col, row);
                 let bot = dark(col, row + 1);
                 let ch = match (top, bot) {
-                    (true,  true)  => '█',
-                    (true,  false) => '▀',
-                    (false, true)  => '▄',
+                    (true, true) => '█',
+                    (true, false) => '▀',
+                    (false, true) => '▄',
                     (false, false) => ' ',
                 };
                 line.push(ch);

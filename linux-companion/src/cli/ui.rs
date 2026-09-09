@@ -19,24 +19,27 @@ pub fn print_status() {
     {
         println!("  ┌────────────────────────────────────────────────────────┐");
         if session.state == "connected" {
-                println!("  │  🟢 LinLink Companion: CONNECTED (Background Daemon)   │");
-            } else {
-                println!("  │  🟡 LinLink Companion: PAIRING (Waiting for Device)    │");
-            }
-            println!("  └────────────────────────────────────────────────────────┘");
-            println!("    PID:           {}", session.pid);
-            println!("    State:         {}", session.state.to_uppercase());
-            println!("    Server:        http://{}:{}", session.host, session.port);
-            println!("    Started:       {}", session.started_at);
-            if let Some(name) = &session.device_name {
-                println!("    📱 Linked To:  {}", name);
-            }
-            if let Some(ip) = &session.client_ip {
-                println!("    🌐 Device IP:  {}", ip);
-            }
-            println!("    📄 Daemon Log: {}", Storage::log_file().display());
-            println!();
-            return;
+            println!("  │  🟢 LinLink Companion: CONNECTED (Background Daemon)   │");
+        } else {
+            println!("  │  🟡 LinLink Companion: PAIRING (Waiting for Device)    │");
+        }
+        println!("  └────────────────────────────────────────────────────────┘");
+        println!("    PID:           {}", session.pid);
+        println!("    State:         {}", session.state.to_uppercase());
+        println!(
+            "    Server:        http://{}:{}",
+            session.host, session.port
+        );
+        println!("    Started:       {}", session.started_at);
+        if let Some(name) = &session.device_name {
+            println!("    📱 Linked To:  {}", name);
+        }
+        if let Some(ip) = &session.client_ip {
+            println!("    🌐 Device IP:  {}", ip);
+        }
+        println!("    📄 Daemon Log: {}", Storage::log_file().display());
+        println!();
+        return;
     }
 
     println!("  ┌────────────────────────────────────────────────────────┐");
@@ -77,7 +80,10 @@ pub fn print_devices(current_only: bool, past_only: bool) {
                 println!("    Daemon PID:    {}", dev.pid);
                 println!("    Server:        http://{}:{}", dev.host, dev.port);
                 println!();
-                println!("    👉 To disconnect this device, run: `linlink stop \"{}\"`", dev.name);
+                println!(
+                    "    👉 To disconnect this device, run: `linlink stop \"{}\"`",
+                    dev.name
+                );
             }
             None => {
                 println!("    (No device is currently connected)");

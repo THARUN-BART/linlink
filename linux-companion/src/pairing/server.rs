@@ -163,14 +163,14 @@ async fn handle_handshake(
 }
 
 /// Status endpoint for clients or CLI to verify companion state
-async fn handle_status(
-    State(state): State<Arc<AppState>>,
-) -> Json<StatusResponse> {
+async fn handle_status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
     let s = state.pairing_state.lock().await;
     let (state_str, device_name) = match &*s {
         PairingState::Pairing => ("pairing".to_string(), None),
         PairingState::Waiting => ("waiting".to_string(), None),
-        PairingState::Connected { device_name } => ("connected".to_string(), Some(device_name.clone())),
+        PairingState::Connected { device_name } => {
+            ("connected".to_string(), Some(device_name.clone()))
+        }
         PairingState::Stopped => ("stopped".to_string(), None),
     };
 
@@ -212,7 +212,13 @@ pub async fn start(
     port: u16,
     session_id: String,
     token: String,
-) -> Result<(tokio::task::JoinHandle<()>, mpsc::UnboundedReceiver<PairingEvent>), std::io::Error> {
+) -> Result<
+    (
+        tokio::task::JoinHandle<()>,
+        mpsc::UnboundedReceiver<PairingEvent>,
+    ),
+    std::io::Error,
+> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<PairingEvent>();
 
     let shared = Arc::new(AppState {

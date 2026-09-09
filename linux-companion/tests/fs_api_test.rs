@@ -69,8 +69,12 @@ async fn handle_upload(
     }
     let dir = query.dest_dir.unwrap_or_else(|| "/tmp".into());
     let dest = std::path::PathBuf::from(dir).join(&query.filename);
-    tokio::fs::write(&dest, &body).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(axum::Json(serde_json::json!({ "status": "ok", "path": dest.to_string_lossy() })))
+    tokio::fs::write(&dest, &body)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(axum::Json(
+        serde_json::json!({ "status": "ok", "path": dest.to_string_lossy() }),
+    ))
 }
 
 async fn handle_download(
@@ -80,7 +84,9 @@ async fn handle_download(
     if query.token != state.token {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let bytes = tokio::fs::read(&query.path).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = tokio::fs::read(&query.path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let headers = [(header::CONTENT_TYPE, "application/octet-stream".to_string())];
     Ok((headers, bytes))
 }
@@ -105,9 +111,12 @@ async fn test_tcp_fs_api_endpoints() {
         .expect("bind failed");
 
     tokio::spawn(async move {
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -116,7 +125,9 @@ async fn test_tcp_fs_api_endpoints() {
     let file_content = b"Hello from LinLink TCP file test!";
     let upload_req = format!(
         "POST /api/fs/upload?token={}&dest_dir=/tmp&filename=linlink_test.txt HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        token, port, file_content.len()
+        token,
+        port,
+        file_content.len()
     );
 
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();

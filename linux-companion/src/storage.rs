@@ -101,9 +101,7 @@ impl Storage {
             }
         }
 
-        if modified
-            && let Ok(json) = serde_json::to_string_pretty(&devices)
-        {
+        if modified && let Ok(json) = serde_json::to_string_pretty(&devices) {
             let _ = fs::write(Self::devices_file(), json);
         }
     }
@@ -111,9 +109,7 @@ impl Storage {
     pub fn remove_device(id_or_name: &str) -> bool {
         let mut devices = Self::load_devices();
         let initial_len = devices.len();
-        devices.retain(|d| {
-            d.id != id_or_name && !d.name.eq_ignore_ascii_case(id_or_name)
-        });
+        devices.retain(|d| d.id != id_or_name && !d.name.eq_ignore_ascii_case(id_or_name));
         if devices.len() != initial_len {
             if let Ok(json) = serde_json::to_string_pretty(&devices) {
                 let _ = fs::write(Self::devices_file(), json);

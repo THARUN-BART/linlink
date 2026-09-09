@@ -36,24 +36,28 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Check Formatting (Rust)
-        working-directory: linux-companion
-        run: cargo fmt --all -- --check
+        run: |
+          cd linux-companion
+          cargo fmt --all -- --check
 
       - name: Run Clippy (Rust)
-        working-directory: linux-companion
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          cd linux-companion
+          cargo clippy --all-targets -- -D warnings
 
       - name: Run Tests (Rust)
-        working-directory: linux-companion
-        run: cargo test --locked
+        run: |
+          cd linux-companion
+          cargo test --locked
 
       - name: Build Linux Release
-        working-directory: linux-companion
-        run: cargo build --release --locked
+        run: |
+          cd linux-companion
+          cargo build --release --locked
 
       - name: Verify Linux Binary
-        working-directory: linux-companion
         run: |
+          cd linux-companion
           test -f target/release/linlink
           file target/release/linlink
           chmod +x target/release/linlink
@@ -65,8 +69,8 @@ jobs:
 
           cp linux-companion/target/release/linlink release_assets/linlink-linux-x86_64/
 
-          if [ -f README.md ]; then
-            cp README.md release_assets/linlink-linux-x86_64/
+          if [ -f linux-companion/README.md ]; then
+            cp linux-companion/README.md release_assets/linlink-linux-x86_64/
           fi
 
           if [ -f LICENSE ]; then
