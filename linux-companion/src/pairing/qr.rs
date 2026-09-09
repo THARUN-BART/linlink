@@ -22,8 +22,8 @@ impl PairingQr {
         format!("linlink://{}:{}?t={}", self.host, self.port, self.token)
     }
 
-    /// Print a high-contrast QR code to the terminal using ANSI escape codes
-    /// (white background + black blocks) with a proper quiet zone.
+    /// Print a high-contrast QR code to the terminal using TrueColor ANSI escape codes
+    /// (pure white background + pure black blocks) with an ISO-compliant 4-module quiet zone.
     ///
     /// This ensures phone cameras and ML Kit can scan it reliably against dark or light terminals.
     pub fn print_to_terminal(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -45,20 +45,28 @@ impl PairingQr {
         // We need an even number of rows (pad with a light row if needed).
         let rows = if width % 2 == 0 { width } else { width + 1 };
 
-        // ANSI escape codes: \x1b[47;30m = pure white background, black foreground.
-        let white_bg = "\x1b[47;30m";
+        // 24-bit TrueColor ANSI escape codes:
+        // Background: RGB(255, 255, 255) pure white
+        // Foreground: RGB(0, 0, 0) pure pitch black
+        let white_bg = "\x1b[48;2;255;255;255;38;2;0;0;0m";
         let reset = "\x1b[0m";
 
-        let border = format!("    {}{}{}", white_bg, " ".repeat(width + 4), reset);
+        // ISO/IEC 18004 specifies a quiet zone of at least 4 modules on all 4 sides.
+        // Horizontally: 4 characters on left and 4 on right.
+        // Vertically: 2 terminal lines top and bottom (each line represents 2 modules = 4 modules).
+        let quiet_cols = 4;
+        let border_len = width + (quiet_cols * 2);
+        let border = format!("    {}{}{}", white_bg, " ".repeat(border_len), reset);
 
-        // Top quiet zone (2 vertical modules)
+        // Top quiet zone (4 vertical modules = 2 terminal lines)
+        println!("{}", border);
         println!("{}", border);
 
         let mut row = 0;
         while row < rows {
             let mut line = String::from("    ");
             line.push_str(white_bg);
-            line.push_str("  "); // left quiet zone
+            line.push_str(&" ".repeat(quiet_cols)); // left quiet zone
             for col in 0..width {
                 let top = dark(col, row);
                 let bot = dark(col, row + 1);
@@ -70,13 +78,14 @@ impl PairingQr {
                 };
                 line.push(ch);
             }
-            line.push_str("  "); // right quiet zone
+            line.push_str(&" ".repeat(quiet_cols)); // right quiet zone
             line.push_str(reset);
             println!("{}", line);
             row += 2;
         }
 
-        // Bottom quiet zone
+        // Bottom quiet zone (4 vertical modules = 2 terminal lines)
+        println!("{}", border);
         println!("{}", border);
 
         Ok(())

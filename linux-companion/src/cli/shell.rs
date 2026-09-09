@@ -553,6 +553,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn truncate_str(s: &str, max: usize) -> String {
     if s.len() > max {
         format!("{}…", &s[..max - 1])

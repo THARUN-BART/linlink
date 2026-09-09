@@ -11,9 +11,9 @@ class CameraBloc extends Bloc<CameraEvent, CameraState> {
   CameraBloc({MobileScannerController? scannerController})
       : scannerController = scannerController ??
             MobileScannerController(
-              autoStart: false,
-              detectionSpeed: DetectionSpeed.normal,
-              detectionTimeoutMs: 150,
+              autoStart: true,
+              detectionSpeed: DetectionSpeed.unrestricted,
+              detectionTimeoutMs: 50,
               facing: CameraFacing.back,
               formats: const [BarcodeFormat.qrCode],
               torchEnabled: false,

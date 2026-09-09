@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'features/home/home_screen.dart';
+import 'theme/linlink_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,11 +35,7 @@ class LinLinkApp extends StatelessWidget {
     return MaterialApp(
       title: 'LinLink',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        colorSchemeSeed: Colors.cyan,
-        useMaterial3: true,
-      ),
+      theme: LinLinkTheme.darkTheme,
       home: const HomeScreen(),
     );
   }

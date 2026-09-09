@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../../theme/linlink_theme.dart';
 import '../../pairing/pairing_service.dart';
 import '../bloc/camera_bloc.dart';
 import '../bloc/camera_event.dart';
@@ -28,190 +30,335 @@ class _ScannerView extends StatelessWidget {
     final cameraBloc = context.read<CameraBloc>();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan Companion QR Code'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.edit_note),
-            tooltip: 'Enter Manually',
-            onPressed: () => _showManualEntryDialog(context),
-          ),
-          BlocBuilder<CameraBloc, CameraState>(
-            buildWhen: (prev, curr) => prev.isTorchOn != curr.isTorchOn,
-            builder: (context, state) {
-              return IconButton(
-                icon: Icon(
-                  state.isTorchOn ? Icons.flash_on : Icons.flash_off,
+      backgroundColor: LinLinkColors.background,
+      body: SafeArea(
+        child: BlocConsumer<CameraBloc, CameraState>(
+          listener: (context, state) {
+            if (state.status == CameraStatus.scanned && state.scannedData != null) {
+              _handleScannedData(context, state.scannedData!);
+            }
+          },
+          builder: (context, state) {
+            return Stack(
+              children: [
+                // Camera viewfinder or fallback
+                Positioned.fill(
+                  child: _buildCameraContent(context, state),
                 ),
-                onPressed: () => cameraBloc.add(const CameraToggleTorchRequested()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.cameraswitch),
-            onPressed: () => cameraBloc.add(const CameraSwitchRequested()),
-          ),
-        ],
-      ),
-      body: BlocConsumer<CameraBloc, CameraState>(
-        listener: (context, state) {
-          if (state.status == CameraStatus.scanned && state.scannedData != null) {
-            _handleScannedData(context, state.scannedData!);
-          }
-        },
-        builder: (context, state) {
-          if (state.status == CameraStatus.permissionRequesting) {
-            return const Center(child: CircularProgressIndicator());
-          }
 
-          if (state.status == CameraStatus.permissionDenied) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.no_photography, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Camera permission is required to scan the pairing QR code.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () => cameraBloc.add(const CameraInitializeRequested()),
-                      child: const Text('Grant Permission'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton.icon(
-                      icon: const Icon(Icons.keyboard),
-                      label: const Text('Or Enter Code Manually'),
-                      onPressed: () => _showManualEntryDialog(context),
-                    ),
-                  ],
+                // Top app bar
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        style: IconButton.styleFrom(
+                          backgroundColor: LinLinkColors.surfaceContainer.withAlpha(220),
+                          foregroundColor: LinLinkColors.onSurface,
+                        ),
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: () => Navigator.of(context).pop(),
+                        tooltip: 'Back',
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Scan Linux QR',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: LinLinkColors.onSurface,
+                              ),
+                            ),
+                            Text(
+                              'Point at the code generated by `linlink pair`',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: LinLinkColors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+
+                // Bottom Controls (Terminal snippet, Torch & Manual IP)
+                Positioned(
+                  bottom: 24,
+                  left: 20,
+                  right: 20,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Terminal command card
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: LinLinkColors.surfaceContainer.withAlpha(235),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: LinLinkColors.outlineVariant),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.terminal,
+                              color: LinLinkColors.primary,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'RUN ON YOUR WORKSTATION',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.8,
+                                      color: LinLinkColors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  SizedBox(height: 1),
+                                  Text(
+                                    'linlink pair',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.w600,
+                                      color: LinLinkColors.onSurface,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.copy, size: 16),
+                              color: LinLinkColors.primary,
+                              tooltip: 'Copy command',
+                              onPressed: () {
+                                Clipboard.setData(const ClipboardData(text: 'linlink pair'));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Copied "linlink pair" to clipboard'),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Torch and manual IP actions
+                      Row(
+                        children: [
+                          Expanded(
+                            child: BlocBuilder<CameraBloc, CameraState>(
+                              buildWhen: (prev, curr) => prev.isTorchOn != curr.isTorchOn,
+                              builder: (context, state) {
+                                return OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: LinLinkColors.surfaceContainer.withAlpha(220),
+                                    foregroundColor: state.isTorchOn
+                                        ? LinLinkColors.primary
+                                        : LinLinkColors.onSurface,
+                                    side: BorderSide(
+                                      color: state.isTorchOn
+                                          ? LinLinkColors.primary
+                                          : LinLinkColors.outlineVariant,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(vertical: 13),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  icon: Icon(
+                                    state.isTorchOn
+                                        ? Icons.flashlight_on
+                                        : Icons.flashlight_off,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    state.isTorchOn ? 'Torch On' : 'Torch Off',
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  onPressed: () =>
+                                      cameraBloc.add(const CameraToggleTorchRequested()),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: LinLinkColors.primary,
+                                foregroundColor: LinLinkColors.onPrimary,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              icon: const Icon(Icons.lan_outlined, size: 18),
+                              label: const Text(
+                                'Manual IP',
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              onPressed: () => _showManualEntryDialog(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             );
-          }
-
-          if (state.status == CameraStatus.permissionPermanentlyDenied) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.settings, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Camera permission permanently denied.\nPlease enable it in App Settings or enter manually.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () => openAppSettings(),
-                      child: const Text('Open Settings'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton.icon(
-                      icon: const Icon(Icons.keyboard),
-                      label: const Text('Enter Code Manually'),
-                      onPressed: () => _showManualEntryDialog(context),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          if (state.status == CameraStatus.error) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
-                    const SizedBox(height: 16),
-                    Text(
-                      state.errorMessage ?? 'An error occurred with camera',
-                      style: const TextStyle(color: Colors.redAccent),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => cameraBloc.add(const CameraInitializeRequested()),
-                      child: const Text('Retry'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton.icon(
-                      icon: const Icon(Icons.keyboard),
-                      label: const Text('Enter Code Manually'),
-                      onPressed: () => _showManualEntryDialog(context),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              MobileScanner(
-                controller: cameraBloc.scannerController,
-                onDetect: (capture) {
-                  final barcodes = capture.barcodes;
-                  for (final barcode in barcodes) {
-                    final raw = barcode.rawValue ?? barcode.displayValue;
-                    if (raw != null && raw.trim().isNotEmpty) {
-                      cameraBloc.add(CameraBarcodeScanned(raw.trim()));
-                      break;
-                    }
-                  }
-                },
-              ),
-              _buildScanOverlay(context),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildScanOverlay(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+  Widget _buildCameraContent(BuildContext context, CameraState state) {
+    final cameraBloc = context.read<CameraBloc>();
+
+    if (state.status == CameraStatus.permissionRequesting) {
+      return const Center(
+        child: CircularProgressIndicator(color: LinLinkColors.primary),
+      );
+    }
+
+    if (state.status == CameraStatus.permissionDenied ||
+        state.status == CameraStatus.permissionPermanentlyDenied) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: LinLinkColors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.no_photography_outlined,
+                  size: 32,
+                  color: LinLinkColors.outline,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Camera Access Needed',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: LinLinkColors.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Camera permission is required to scan the pairing QR code from your Linux terminal.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: LinLinkColors.onSurfaceVariant,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () => state.status == CameraStatus.permissionPermanentlyDenied
+                    ? openAppSettings()
+                    : cameraBloc.add(const CameraInitializeRequested()),
+                child: const Text('Grant Camera Access'),
+              ),
+              const SizedBox(height: 10),
+              TextButton.icon(
+                icon: const Icon(Icons.keyboard_outlined, size: 18),
+                label: const Text('Enter Connection Manually'),
+                onPressed: () => _showManualEntryDialog(context),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Stack(
       children: [
-        Container(
-          width: 260,
-          height: 260,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.cyanAccent, width: 2.5),
-            borderRadius: BorderRadius.circular(16),
-          ),
+        MobileScanner(
+          controller: cameraBloc.scannerController,
+          onDetect: (capture) {
+            for (final barcode in capture.barcodes) {
+              final raw = barcode.rawValue ?? barcode.displayValue;
+              if (raw != null && raw.trim().isNotEmpty) {
+                cameraBloc.add(CameraBarcodeScanned(raw.trim()));
+                break;
+              }
+            }
+          },
         ),
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.black87,
-            borderRadius: BorderRadius.circular(8),
+
+        // Clean framed reticle cutout overlay
+        Center(
+          child: SizedBox(
+            width: 260,
+            height: 260,
+            child: Stack(
+              children: [
+                // Clean viewfinder boundary
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: LinLinkColors.primary.withAlpha(180),
+                      width: 2,
+                    ),
+                  ),
+                ),
+
+                // Subtle corner markers
+                const _ViewfinderCorners(),
+
+                // Instruction label
+                Positioned(
+                  bottom: 14,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: LinLinkColors.background.withAlpha(200),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: LinLinkColors.outlineVariant),
+                      ),
+                      child: const Text(
+                        'Align QR code within frame',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: LinLinkColors.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: const Text(
-            'Point camera at the QR code on your Linux terminal',
-            style: TextStyle(color: Colors.white, fontSize: 13),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextButton.icon(
-          style: TextButton.styleFrom(
-            backgroundColor: Colors.black54,
-            foregroundColor: Colors.cyanAccent,
-          ),
-          icon: const Icon(Icons.keyboard, size: 18),
-          label: const Text('Or Enter Pairing Code Manually'),
-          onPressed: () => _showManualEntryDialog(context),
         ),
       ],
     );
@@ -226,17 +373,18 @@ class _ScannerView extends StatelessWidget {
         context: context,
         barrierDismissible: false,
         builder: (dialogCtx) => AlertDialog(
+          backgroundColor: LinLinkColors.surfaceContainer,
           title: const Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              Icon(Icons.warning_amber_rounded, color: LinLinkColors.warning),
               SizedBox(width: 8),
               Text('Unrecognized QR'),
             ],
           ),
           content: Text(
-            'The scanned text is not a valid LinLink pairing code:\n"$payload"\n\n'
-            'Please scan the QR code generated by `linlink pair` in your Linux terminal, '
-            'or enter the details manually.',
+            'The scanned text is not a valid LinLink pairing payload:\n"$payload"\n\n'
+            'Please run `linlink pair` in your Linux terminal to generate a valid code.',
+            style: const TextStyle(color: LinLinkColors.onSurfaceVariant),
           ),
           actions: [
             TextButton(
@@ -259,7 +407,6 @@ class _ScannerView extends StatelessWidget {
       return;
     }
 
-    // Valid target found – show pairing confirmation dialog
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -278,7 +425,7 @@ class _ScannerView extends StatelessWidget {
   }
 
   void _showManualEntryDialog(BuildContext context) {
-    final hostController = TextEditingController(text: '10.253.176.30');
+    final hostController = TextEditingController();
     final portController = TextEditingController(text: '7878');
     final tokenController = TextEditingController();
     final nameController = TextEditingController(text: 'Android Phone');
@@ -286,9 +433,10 @@ class _ScannerView extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
+        backgroundColor: LinLinkColors.surfaceContainer,
         title: const Row(
           children: [
-            Icon(Icons.link, color: Colors.cyanAccent),
+            Icon(Icons.lan_outlined, color: LinLinkColors.primary),
             SizedBox(width: 10),
             Text('Manual Pairing'),
           ],
@@ -299,17 +447,15 @@ class _ScannerView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Enter the details printed in your terminal under the QR code:',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+                'Enter the IP and session token printed by `linlink pair` on your Linux host:',
+                style: TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               TextField(
                 controller: hostController,
                 decoration: const InputDecoration(
-                  labelText: 'Companion IP / Host',
-                  hintText: 'e.g. 192.168.1.50',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                  labelText: 'Linux IP / Host (or full URL)',
+                  hintText: '192.168.1.50 or 10.0.0.5',
                 ),
               ),
               const SizedBox(height: 10),
@@ -319,28 +465,22 @@ class _ScannerView extends StatelessWidget {
                 decoration: const InputDecoration(
                   labelText: 'Port',
                   hintText: '7878',
-                  border: OutlineInputBorder(),
-                  isDense: true,
                 ),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: tokenController,
                 decoration: const InputDecoration(
-                  labelText: 'Token or Full linlink:// URI',
-                  hintText: 'e.g. 4a7bc12d',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                  labelText: 'Session Token (or full URL)',
+                  hintText: 'e.g. 31327e36 or linlink://...',
                 ),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: nameController,
                 decoration: const InputDecoration(
-                  labelText: 'This Device Name',
-                  hintText: 'e.g. Pixel 8',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                  labelText: 'Device Name (shown on Linux)',
+                  hintText: 'Pixel 8',
                 ),
               ),
             ],
@@ -353,19 +493,22 @@ class _ScannerView extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () {
+              final rawHost = hostController.text.trim();
               final rawToken = tokenController.text.trim();
-              final target = PairingTarget.tryParse(rawToken);
+              final targetFromToken = PairingTarget.tryParse(rawToken);
+              final targetFromHost = PairingTarget.tryParse(rawHost);
 
-              final effectiveTarget = target ??
+              final effectiveTarget = targetFromToken ??
+                  targetFromHost ??
                   PairingTarget(
-                    host: hostController.text.trim(),
+                    host: rawHost,
                     port: int.tryParse(portController.text.trim()) ?? 7878,
                     token: rawToken,
                   );
 
               if (effectiveTarget.token.isEmpty || effectiveTarget.host.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter host and token.')),
+                  const SnackBar(content: Text('Please enter host and token (or paste URL).')),
                 );
                 return;
               }
@@ -389,6 +532,69 @@ class _ScannerView extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ViewfinderCorners extends StatelessWidget {
+  const _ViewfinderCorners();
+
+  @override
+  Widget build(BuildContext context) {
+    const stroke = 3.5;
+    const len = 20.0;
+    const color = LinLinkColors.primary;
+
+    return Stack(
+      children: [
+        // Top-Left
+        Positioned(
+          top: 0,
+          left: 0,
+          child: Container(width: len, height: stroke, color: color),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          child: Container(width: stroke, height: len, color: color),
+        ),
+
+        // Top-Right
+        Positioned(
+          top: 0,
+          right: 0,
+          child: Container(width: len, height: stroke, color: color),
+        ),
+        Positioned(
+          top: 0,
+          right: 0,
+          child: Container(width: stroke, height: len, color: color),
+        ),
+
+        // Bottom-Left
+        Positioned(
+          bottom: 0,
+          left: 0,
+          child: Container(width: len, height: stroke, color: color),
+        ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          child: Container(width: stroke, height: len, color: color),
+        ),
+
+        // Bottom-Right
+        Positioned(
+          bottom: 0,
+          right: 0,
+          child: Container(width: len, height: stroke, color: color),
+        ),
+        Positioned(
+          bottom: 0,
+          right: 0,
+          child: Container(width: stroke, height: len, color: color),
+        ),
+      ],
     );
   }
 }
@@ -436,9 +642,8 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
   }
 
   Future<void> _startPairing() async {
-    final name = _nameController.text.trim().isEmpty
-        ? 'Android Device'
-        : _nameController.text.trim();
+    final name =
+        _nameController.text.trim().isEmpty ? 'Android Device' : _nameController.text.trim();
 
     setState(() {
       _isLinking = true;
@@ -466,11 +671,12 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      backgroundColor: LinLinkColors.surfaceContainer,
       title: const Row(
         children: [
-          Icon(Icons.phonelink_setup, color: Colors.cyanAccent),
+          Icon(Icons.phonelink_setup, color: LinLinkColors.primary),
           SizedBox(width: 10),
-          Text('Link Device'),
+          Text('Confirm Connection'),
         ],
       ),
       content: SingleChildScrollView(
@@ -479,20 +685,36 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Linux Companion detected:',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
+              'Linux Companion Target:',
+              style: TextStyle(
+                color: LinLinkColors.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white12),
+                color: LinLinkColors.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: LinLinkColors.outlineVariant),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.computer, size: 28, color: Colors.cyanAccent),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: LinLinkColors.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.desktop_windows,
+                      size: 20,
+                      color: LinLinkColors.primary,
+                    ),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -501,13 +723,20 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
                         Text(
                           '${widget.target.host}:${widget.target.port}',
                           style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            color: LinLinkColors.onSurface,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
                           'Token: ${widget.target.token}',
-                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          style: const TextStyle(
+                            color: LinLinkColors.onSurfaceVariant,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
                         ),
                       ],
                     ),
@@ -515,18 +744,16 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             const Text(
-              'Device Name (shown on Linux companion):',
-              style: TextStyle(fontSize: 13),
+              'Device Name (shown on Linux):',
+              style: TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
             ),
             const SizedBox(height: 6),
             TextField(
               controller: _nameController,
               enabled: !_isLinking,
               decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                isDense: true,
                 hintText: 'e.g. Pixel 8',
               ),
             ),
@@ -535,34 +762,40 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
               const Center(
                 child: Column(
                   children: [
-                    CircularProgressIndicator(),
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: LinLinkColors.primary,
+                      ),
+                    ),
                     SizedBox(height: 10),
                     Text(
                       'Linking with Linux Companion…',
-                      style: TextStyle(fontSize: 13, color: Colors.cyanAccent),
+                      style: TextStyle(fontSize: 13, color: LinLinkColors.primary),
                     ),
                   ],
                 ),
               ),
             ],
             if (_errorMessage != null) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.red.withAlpha(40),
+                  color: LinLinkColors.errorContainer.withAlpha(50),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.redAccent.withAlpha(100)),
+                  border: Border.all(color: LinLinkColors.error.withAlpha(80)),
                 ),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                    const Icon(Icons.error_outline, color: LinLinkColors.error, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                        style: const TextStyle(color: LinLinkColors.error, fontSize: 12),
                       ),
                     ),
                   ],
@@ -579,7 +812,7 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
             child: const Text('Cancel'),
           ),
           FilledButton.icon(
-            icon: const Icon(Icons.link),
+            icon: const Icon(Icons.link, size: 18),
             label: const Text('Link Now'),
             onPressed: _startPairing,
           ),

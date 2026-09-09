@@ -12,17 +12,24 @@ class PairingTarget {
     required this.token,
   });
 
-  /// Parse URLs in format: linlink://HOST:PORT?t=TOKEN or http://HOST:PORT?t=TOKEN
+  /// Parse URLs in format: linlink://HOST:PORT?t=TOKEN or http://HOST:PORT?t=TOKEN or HOST:PORT?t=TOKEN
   static PairingTarget? tryParse(String raw) {
     try {
-      final uri = Uri.parse(raw.trim());
+      var trimmed = raw.trim();
+      if (trimmed.isEmpty) return null;
+
+      if (!trimmed.contains('://')) {
+        trimmed = 'linlink://$trimmed';
+      }
+
+      final uri = Uri.parse(trimmed);
       if (uri.scheme != 'linlink' && uri.scheme != 'http' && uri.scheme != 'https') {
         return null;
       }
       final host = uri.host;
       if (host.isEmpty) return null;
       final port = uri.hasPort ? uri.port : 7878;
-      final token = uri.queryParameters['t'] ?? '';
+      final token = uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '';
       if (token.isEmpty) return null;
 
       return PairingTarget(host: host, port: port, token: token);

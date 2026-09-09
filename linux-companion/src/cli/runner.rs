@@ -219,10 +219,18 @@ async fn run_pair(host: String, port: u16, foreground: bool) {
     if let Err(e) = qr_data.print_to_terminal() {
         eprintln!("Failed to render QR: {}", e);
     }
+    let pairing_url = qr_data.encode();
     println!(
-        "\n  Session expires in 5 minutes.\n  Listening on http://{}:{}\n",
+        "\n  Listening on http://{}:{}\n  Session expires in 5 minutes.\n",
         advertised_host, port
     );
+    println!("  ┌────────────────────────────────────────────────────────┐");
+    println!("  │  📱 Can't scan? Enter manually in LinLink mobile app:  │");
+    println!("  │     • Host:  {:42} │", advertised_host);
+    println!("  │     • Port:  {:42} │", port);
+    println!("  │     • Token: {:42} │", token);
+    println!("  │     • URL:   {:42} │", pairing_url);
+    println!("  └────────────────────────────────────────────────────────┘\n");
 
     let mut is_connected = false;
 

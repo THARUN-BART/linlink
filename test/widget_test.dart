@@ -4,6 +4,7 @@ import 'package:linlink/main.dart';
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const LinLinkApp());
-    expect(find.text('Phone ↔ Linux Bridge'), findsOneWidget);
+    expect(find.text('Connect your Linux computer'), findsOneWidget);
+    expect(find.text('Scan QR Code'), findsOneWidget);
   });
 }
