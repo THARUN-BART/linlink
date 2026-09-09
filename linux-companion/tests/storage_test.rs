@@ -1,4 +1,4 @@
-use linux_companion::storage::{ActiveSession, PairedDevice, Storage, current_timestamp};
+use linux_companion::storage::{current_timestamp, ActiveSession, PairedDevice, Storage};
 
 #[test]
 fn test_current_timestamp_format() {

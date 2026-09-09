@@ -101,8 +101,10 @@ impl Storage {
             }
         }
 
-        if modified && let Ok(json) = serde_json::to_string_pretty(&devices) {
-            let _ = fs::write(Self::devices_file(), json);
+        if modified {
+            if let Ok(json) = serde_json::to_string_pretty(&devices) {
+                let _ = fs::write(Self::devices_file(), json);
+            }
         }
     }
 

@@ -1,16 +1,16 @@
 use axum::{
-    Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     routing::{get, post},
+    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 
 use crate::pairing::state::PairingState;
-use crate::storage::{ActiveSession, PairedDevice, Storage, current_timestamp};
+use crate::storage::{current_timestamp, ActiveSession, PairedDevice, Storage};
 
 #[derive(Debug, Clone)]
 pub enum PairingEvent {

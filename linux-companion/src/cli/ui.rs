@@ -14,32 +14,32 @@ pub fn print_state_banner(state: PairingState) {
 
 pub fn print_status() {
     println!();
-    if let Some(session) = Storage::load_session()
-        && Storage::is_pid_alive(session.pid)
-    {
-        println!("  ┌────────────────────────────────────────────────────────┐");
-        if session.state == "connected" {
-            println!("  │  🟢 LinLink Companion: CONNECTED (Background Daemon)   │");
-        } else {
-            println!("  │  🟡 LinLink Companion: PAIRING (Waiting for Device)    │");
+    if let Some(session) = Storage::load_session() {
+        if Storage::is_pid_alive(session.pid) {
+            println!("  ┌────────────────────────────────────────────────────────┐");
+            if session.state == "connected" {
+                println!("  │  🟢 LinLink Companion: CONNECTED (Background Daemon)   │");
+            } else {
+                println!("  │  🟡 LinLink Companion: PAIRING (Waiting for Device)    │");
+            }
+            println!("  └────────────────────────────────────────────────────────┘");
+            println!("    PID:           {}", session.pid);
+            println!("    State:         {}", session.state.to_uppercase());
+            println!(
+                "    Server:        http://{}:{}",
+                session.host, session.port
+            );
+            println!("    Started:       {}", session.started_at);
+            if let Some(name) = &session.device_name {
+                println!("    📱 Linked To:  {}", name);
+            }
+            if let Some(ip) = &session.client_ip {
+                println!("    🌐 Device IP:  {}", ip);
+            }
+            println!("    📄 Daemon Log: {}", Storage::log_file().display());
+            println!();
+            return;
         }
-        println!("  └────────────────────────────────────────────────────────┘");
-        println!("    PID:           {}", session.pid);
-        println!("    State:         {}", session.state.to_uppercase());
-        println!(
-            "    Server:        http://{}:{}",
-            session.host, session.port
-        );
-        println!("    Started:       {}", session.started_at);
-        if let Some(name) = &session.device_name {
-            println!("    📱 Linked To:  {}", name);
-        }
-        if let Some(ip) = &session.client_ip {
-            println!("    🌐 Device IP:  {}", ip);
-        }
-        println!("    📄 Daemon Log: {}", Storage::log_file().display());
-        println!();
-        return;
     }
 
     println!("  ┌────────────────────────────────────────────────────────┐");

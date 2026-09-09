@@ -1,6 +1,6 @@
 use linux_companion::daemon::{DaemonProcess, StopOutcome};
 use linux_companion::device::{DeviceManager, PairedDevice};
-use linux_companion::storage::{ActiveSession, Storage, current_timestamp};
+use linux_companion::storage::{current_timestamp, ActiveSession, Storage};
 
 static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

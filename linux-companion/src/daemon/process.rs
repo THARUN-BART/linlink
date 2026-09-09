@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 use tracing::info;
 
 use crate::device::model::ActiveSession;
-use crate::storage::{Storage, current_timestamp};
+use crate::storage::{current_timestamp, Storage};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StopOutcome {
@@ -31,12 +31,12 @@ impl DaemonProcess {
     /// Determines the correct path to the linlink binary
     pub fn binary_path() -> std::path::PathBuf {
         let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("linlink"));
-        if exe.to_string_lossy().contains("/deps/")
-            && let Some(target_dir) = exe.parent().and_then(|p| p.parent())
-        {
-            let candidate = target_dir.join("linlink");
-            if candidate.exists() {
-                return candidate;
+        if exe.to_string_lossy().contains("/deps/") {
+            if let Some(target_dir) = exe.parent().and_then(|p| p.parent()) {
+                let candidate = target_dir.join("linlink");
+                if candidate.exists() {
+                    return candidate;
+                }
             }
         }
         exe

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::cli::args::{Cli, Commands};
 use crate::cli::ui;
-use crate::daemon::{DaemonProcess, StopOutcome, run_daemon_server};
+use crate::daemon::{run_daemon_server, DaemonProcess, StopOutcome};
 use crate::pairing::{
     network::detect_local_ip,
     qr::PairingQr,
@@ -14,7 +14,7 @@ use crate::pairing::{
     session::PairingSession,
     state::PairingState,
 };
-use crate::storage::{ActiveSession, Storage, current_timestamp};
+use crate::storage::{current_timestamp, ActiveSession, Storage};
 
 pub fn run() {
     let cli = Cli::parse();
@@ -156,14 +156,14 @@ pub fn run() {
 
 async fn run_pair(host: String, port: u16, foreground: bool) {
     // Check if an existing session is running
-    if let Some(existing) = Storage::load_session()
-        && Storage::is_pid_alive(existing.pid)
-    {
-        eprintln!(
-            "\n  ⚠️  An active LinLink session is already running (PID: {}).\n      Run `linlink stop` first or connect with `linlink shell`.\n",
-            existing.pid
-        );
-        return;
+    if let Some(existing) = Storage::load_session() {
+        if Storage::is_pid_alive(existing.pid) {
+            eprintln!(
+                "\n  ⚠️  An active LinLink session is already running (PID: {}).\n      Run `linlink stop` first or connect with `linlink shell`.\n",
+                existing.pid
+            );
+            return;
+        }
     }
 
     // Check if an orphaned LinLink daemon is running

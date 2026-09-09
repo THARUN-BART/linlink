@@ -1,19 +1,19 @@
 use axum::{
-    Json, Router,
     body::Bytes,
     extract::{ConnectInfo, Query, State},
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::IntoResponse,
     routing::{get, post},
+    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{Mutex, mpsc};
+use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::{mpsc, Mutex};
 use tracing::info;
 
-use crate::storage::{ActiveSession, Storage, current_timestamp};
+use crate::storage::{current_timestamp, ActiveSession, Storage};
 
 pub struct DaemonServerState {
     pub session_id: String,
