@@ -19,24 +19,14 @@ class PairingSuccessScreen extends StatelessWidget {
             children: [
               const SizedBox(height: 32),
 
-              // Clean success badge (no fake glowing halos)
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: LinLinkColors.secondaryContainer.withAlpha(70),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: LinLinkColors.secondary.withAlpha(100),
-                    width: 1.5,
-                  ),
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.check_rounded,
-                    color: LinLinkColors.secondary,
-                    size: 40,
-                  ),
+              // App icon badge
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(
+                  'assets/icon.png',
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
                 ),
               ),
               const SizedBox(height: 20),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../pairing/pairing_service.dart';
 
@@ -76,6 +77,38 @@ class StorageService {
         'filename': filename,
         'content': content,
       }));
+      final res = await req.close();
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Send any binary file (photo, video, document) from phone directly to Linux companion
+  static Future<bool> uploadBinaryFile({
+    required PairedCompanion companion,
+    required PlatformFile file,
+    String destDir = '~/Downloads/LinLink',
+  }) async {
+    final filename = file.name;
+    final uploadUri = Uri.parse(
+      '${companion.baseUrl}/api/fs/upload?token=${companion.token}&dest_dir=${Uri.encodeComponent(destDir)}&filename=${Uri.encodeComponent(filename)}',
+    );
+
+    final client = HttpClient()..connectionTimeout = const Duration(minutes: 5);
+    try {
+      final req = await client.postUrl(uploadUri);
+      req.headers.contentType = ContentType.binary;
+      final size = await file.length();
+      req.contentLength = size;
+
+      if (file.path != null && File(file.path!).existsSync()) {
+        final localFile = File(file.path!);
+        await localFile.openRead().cast<List<int>>().pipe(req);
+      } else {
+        await file.readAsByteStream().cast<List<int>>().pipe(req);
+      }
+
       final res = await req.close();
       return res.statusCode == 200;
     } catch (_) {

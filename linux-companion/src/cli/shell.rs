@@ -363,6 +363,10 @@ async fn handle_ls(client: &reqwest_compat::Client, base_url: &str, token: &str,
                 println!("    ❌ Failed to parse response from Android: {}", e);
             }
         },
+        Ok(res) if res.status() == 403 => {
+            println!("    🔒 Remote directory browsing is disabled on this phone (Privacy Mode enabled).");
+            println!("    💡 The phone user can share files directly to Linux using the LinLink app.\n");
+        }
         Ok(res) => {
             println!(
                 "    ❌ Failed to list files (HTTP {}). Check permissions on Android.",
@@ -412,6 +416,10 @@ async fn handle_get(
             } else {
                 println!("    ❌ Failed to read data stream from Android.");
             }
+        }
+        Ok(res) if res.status() == 403 => {
+            println!("    🔒 Remote file access is disabled by the phone for privacy (Privacy Mode enabled).");
+            println!("    💡 Please share files directly from the LinLink mobile app.\n");
         }
         Ok(res) => println!(
             "    ❌ Download failed (HTTP {}). File may not exist.",

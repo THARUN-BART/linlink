@@ -5,11 +5,13 @@ class PairingTarget {
   final String host;
   final int port;
   final String token;
+  final String? deviceName;
 
   const PairingTarget({
     required this.host,
     required this.port,
     required this.token,
+    this.deviceName,
   });
 
   static PairingTarget? tryParse(String raw) {
@@ -17,15 +19,16 @@ class PairingTarget {
       var trimmed = raw.trim();
       if (trimmed.isEmpty) return null;
 
-      // Handle JSON payload: {"host": "...", "port": 7878, "token": "..."}
+      // Handle JSON payload: {"host": "...", "port": 7878, "token": "...", "name": "..."}
       if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
         try {
           final map = jsonDecode(trimmed) as Map<String, dynamic>;
           final host = (map['host'] ?? map['ip'] ?? '') as String;
           final port = (map['port'] as num?)?.toInt() ?? 7878;
           final token = (map['token'] ?? map['t'] ?? '') as String;
+          final name = (map['name'] ?? map['device_name']) as String?;
           if (host.isNotEmpty && token.isNotEmpty) {
-            return PairingTarget(host: host, port: port, token: token);
+            return PairingTarget(host: host, port: port, token: token, deviceName: name);
           }
         } catch (_) {}
       }
@@ -54,8 +57,9 @@ class PairingTarget {
       final port = uri.hasPort ? uri.port : 7878;
       final token = uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '';
       if (token.isEmpty) return null;
+      final name = uri.queryParameters['name'];
 
-      return PairingTarget(host: host, port: port, token: token);
+      return PairingTarget(host: host, port: port, token: token, deviceName: name);
     } catch (_) {
       return null;
     }
@@ -106,8 +110,8 @@ class PairingService {
       }
     } catch (e) {
       throw Exception(
-        'Could not connect to Linux Companion at ${target.host}:${target.port}.\n\n'
-        'Ensure both devices are on the same Wi-Fi network and `linlink pair` is running.\n\nError: $e',
+        'Could not connect to peer at ${target.host}:${target.port}.\n\n'
+        'Ensure both devices are on the same Wi-Fi or Hotspot network.\n\nError: $e',
       );
     }
 
@@ -127,11 +131,21 @@ class PairingService {
         throw Exception('Handshake rejected (${hsRes.statusCode}): $bodyStr');
       }
 
+      String remoteName = target.deviceName ?? (target.port == 7879 ? 'Mobile Peer' : 'Linux Workstation');
+      try {
+        final parsed = jsonDecode(bodyStr) as Map<String, dynamic>;
+        if (parsed['device_name'] != null && parsed['device_name'].toString().isNotEmpty) {
+          remoteName = parsed['device_name'].toString();
+        } else if (parsed['name'] != null && parsed['name'].toString().isNotEmpty) {
+          remoteName = parsed['name'].toString();
+        }
+      } catch (_) {}
+
       return PairedCompanion(
         host: target.host,
         port: target.port,
         token: target.token,
-        deviceName: deviceName,
+        deviceName: remoteName,
         pairedAt: DateTime.now(),
         status: 'Connected',
       );

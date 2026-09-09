@@ -1,3 +1,5 @@
+import 'dart:ui';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/linlink_theme.dart';
@@ -5,6 +7,7 @@ import '../clipboard/clipboard_service.dart';
 import '../clipboard/clipboard_view.dart';
 import '../pairing/pairing_service.dart';
 import '../pairing/pairing_success_screen.dart';
+import '../pairing/views/phone_receive_dialog.dart';
 import '../scanner/views/scanner_screen.dart';
 import '../settings/settings_screen.dart';
 import '../storage/file_agent.dart';
@@ -38,6 +41,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     ClipboardService.onClipboardSynced = (text) {
       if (mounted) {
         setState(() => _lastSyncedClipboard = text);
+      }
+    };
+
+    AndroidFileAgent.onFileReceived = (filename, path) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: LinLinkColors.secondaryContainer,
+            duration: const Duration(seconds: 4),
+            content: Row(
+              children: [
+                const Icon(Icons.download_done, color: LinLinkColors.secondary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '📥 Received: $filename\nSaved in Downloads/LinLink',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    };
+
+    AndroidFileAgent.onLinuxDisconnected = () {
+      if (mounted) {
+        ClipboardService.stopAutoSync();
+        AndroidFileAgent.stopServer();
+        setState(() {
+          _pairedCompanion = null;
+          _currentTabIndex = 0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: LinLinkColors.errorContainer,
+            content: Row(
+              children: [
+                Icon(Icons.link_off, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Linux companion stopped. Device unlinked.'),
+              ],
+            ),
+          ),
+        );
       }
     };
   }
@@ -93,6 +142,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     }
   }
 
+  Future<void> _openPhoneReceiveDialog() async {
+    final peer = await PhoneReceiveDialog.show(context);
+    if (peer != null && mounted) {
+      setState(() {
+        _pairedCompanion = peer;
+      });
+      await AndroidFileAgent.startServer(companion: peer);
+      if (!mounted) return;
+      ClipboardService.startAutoSync(peer);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: LinLinkColors.secondaryContainer,
+          content: Text('🎉 Linked to ${peer.deviceName}! Ready to transfer files.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _unlinkDevice() async {
     if (_pairedCompanion == null) return;
 
@@ -104,11 +172,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
           children: [
             Icon(Icons.warning_amber_rounded, color: LinLinkColors.error),
             SizedBox(width: 8),
-            Text('Unlink Computer?'),
+            Text('Unlink Device?'),
           ],
         ),
         content: Text(
-          'Are you sure you want to disconnect and revoke the cryptographic session with ${_pairedCompanion!.deviceName} (${_pairedCompanion!.host})?',
+          'Are you sure you want to disconnect and revoke the session with ${_pairedCompanion!.deviceName} (${_pairedCompanion!.host})?',
           style: const TextStyle(color: LinLinkColors.onSurfaceVariant),
         ),
         actions: [
@@ -137,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
         _currentTabIndex = 0;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Session revoked. Computer unlinked.')),
+        const SnackBar(content: Text('Session revoked. Device unlinked.')),
       );
     }
   }
@@ -188,20 +256,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: LinLinkColors.surfaceContainer,
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.edit_note, color: LinLinkColors.secondary),
-            SizedBox(width: 8),
-            Text('Send Note to Linux 📝'),
+            const Icon(Icons.edit_note, color: LinLinkColors.secondary),
+            const SizedBox(width: 8),
+            Text('Send Note to ${_pairedCompanion!.deviceName} 📝'),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Quickly push a note as a .txt file directly to ~/Downloads/LinLink:',
-              style: TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
+            Text(
+              'Quickly push a note as a .txt file directly to ${_pairedCompanion!.deviceName}:',
+              style: const TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -253,9 +321,81 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
             backgroundColor: success ? LinLinkColors.secondaryContainer : LinLinkColors.errorContainer,
             content: Text(
               success
-                ? '✅ Sent to Linux: ~/Downloads/LinLink/$filename'
-                : '❌ Failed to send note to Linux.',
+                ? '✅ Sent to ${_pairedCompanion!.deviceName}: $filename'
+                : '❌ Failed to send note to ${_pairedCompanion!.deviceName}.',
             ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAndShareFiles() async {
+    if (_pairedCompanion == null) {
+      _openScanner();
+      return;
+    }
+
+    try {
+      final files = await FilePicker.pickFiles(type: FileType.any);
+      if (files.isEmpty) return;
+
+      final peerName = _pairedCompanion!.deviceName;
+      int successCount = 0;
+      for (final file in files) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 1),
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text('Sharing "${file.name}" to $peerName…')),
+              ],
+            ),
+          ),
+        );
+
+        final success = await StorageService.uploadBinaryFile(
+          companion: _pairedCompanion!,
+          file: file,
+        );
+
+        if (success) successCount++;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: LinLinkColors.secondaryContainer,
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: LinLinkColors.secondary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    successCount == 1
+                        ? 'Shared 1 file to $peerName!'
+                        : 'Shared $successCount files to $peerName!',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: LinLinkColors.errorContainer,
+            content: Text('Failed to share file: $e'),
           ),
         );
       }
@@ -465,17 +605,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Row(
                 children: [
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: LinLinkColors.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.hub_outlined,
-                      color: LinLinkColors.primary,
-                      size: 18,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      'assets/icon.png',
+                      width: 30,
+                      height: 30,
+                      fit: BoxFit.cover,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -568,51 +704,81 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
           ),
         ),
       ),
-      body: IndexedStack(
-        index: _currentTabIndex,
+      body: Stack(
         children: [
-          // Tab 0: Home / Overview
-          isLinked ? _buildLinkedHomeView() : _buildUnlinkedConnectView(),
-
-          // Tab 1: Files
-          RemoteFileBrowserScreen(
-            companion: _pairedCompanion,
-            onRequestPair: _openScanner,
-          ),
-
-          // Tab 2: Clipboard
-          ClipboardView(
-            pairedCompanion: _pairedCompanion,
-            onRequestPair: _openScanner,
-          ),
-
-          // Tab 3: Settings
-          SettingsScreen(
-            pairedCompanion: _pairedCompanion,
-            onPairNew: _openScanner,
-            onUnlink: _unlinkDevice,
-          ),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: LinLinkColors.surface,
-          border: Border(top: BorderSide(color: LinLinkColors.outlineVariant, width: 1)),
-        ),
-        child: SafeArea(
-          child: SizedBox(
-            height: 60,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+          // Main content — padded so it doesn't hide behind the floating nav
+          Padding(
+            padding: const EdgeInsets.only(bottom: 90),
+            child: IndexedStack(
+              index: _currentTabIndex,
               children: [
-                _buildNavItem(index: 0, icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Overview'),
-                _buildNavItem(index: 1, icon: Icons.folder_outlined, activeIcon: Icons.folder, label: 'Files'),
-                _buildNavItem(index: 2, icon: Icons.content_paste_outlined, activeIcon: Icons.content_paste, label: 'Clipboard'),
-                _buildNavItem(index: 3, icon: Icons.settings_outlined, activeIcon: Icons.settings, label: 'Settings'),
+                // Tab 0: Home / Overview
+                isLinked ? _buildLinkedHomeView() : _buildUnlinkedConnectView(),
+
+                // Tab 1: Files
+                RemoteFileBrowserScreen(
+                  companion: _pairedCompanion,
+                  onRequestPair: _openScanner,
+                ),
+
+                // Tab 2: Clipboard
+                ClipboardView(
+                  pairedCompanion: _pairedCompanion,
+                  onRequestPair: _openScanner,
+                ),
+
+                // Tab 3: Settings
+                SettingsScreen(
+                  pairedCompanion: _pairedCompanion,
+                  onPairNew: _openScanner,
+                  onUnlink: _unlinkDevice,
+                ),
               ],
             ),
           ),
-        ),
+
+          // Floating glass navigation bar
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 20,
+            child: SafeArea(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: LinLinkColors.surface.withAlpha(180),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(
+                        color: LinLinkColors.outlineVariant.withAlpha(120),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(80),
+                          blurRadius: 24,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildNavItem(index: 0, icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Overview'),
+                        _buildNavItem(index: 1, icon: Icons.folder_outlined, activeIcon: Icons.folder, label: 'Files'),
+                        _buildNavItem(index: 2, icon: Icons.content_paste_outlined, activeIcon: Icons.content_paste, label: 'Clipboard'),
+                        _buildNavItem(index: 3, icon: Icons.settings_outlined, activeIcon: Icons.settings, label: 'Settings'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -626,26 +792,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     final isActive = _currentTabIndex == index;
 
     return Expanded(
-      child: InkWell(
+      child: GestureDetector(
         onTap: () => setState(() => _currentTabIndex = index),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isActive ? activeIcon : icon,
-              size: 20,
-              color: isActive ? LinLinkColors.primary : LinLinkColors.onSurfaceVariant,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive
+                ? LinLinkColors.primary.withAlpha(30)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                isActive ? activeIcon : icon,
+                size: 20,
                 color: isActive ? LinLinkColors.primary : LinLinkColors.onSurfaceVariant,
               ),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  color: isActive ? LinLinkColors.primary : LinLinkColors.onSurfaceVariant,
+                  letterSpacing: isActive ? 0.2 : 0,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -658,6 +838,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // App icon hero
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.asset(
+                'assets/icon.png',
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // Hero statement
           const Text(
             'Connect your Linux computer',
@@ -787,6 +981,99 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
             ],
           ),
 
+          const SizedBox(height: 20),
+
+          // Phone to Phone P2P Direct Transfer Card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: LinLinkColors.surfaceContainer,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: LinLinkColors.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.phone_android, color: LinLinkColors.secondary, size: 18),
+                        SizedBox(width: 8),
+                        Text(
+                          'Phone-to-Phone Direct Transfer',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: LinLinkColors.onSurface),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: LinLinkColors.secondaryContainer,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'P2P LAN',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: LinLinkColors.onSecondaryContainer),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Transfer photos, videos, and files directly to another phone over Wi-Fi or Personal Hotspot with zero mobile data or internet used.',
+                  style: TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant, height: 1.3),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: LinLinkColors.surfaceContainerLowest,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: LinLinkColors.outlineVariant),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.shield_outlined, size: 15, color: LinLinkColors.secondary),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Privacy Mode Active: Neither phone can browse or view the other’s internal storage.',
+                          style: TextStyle(fontSize: 11, color: LinLinkColors.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: LinLinkColors.secondaryContainer,
+                          foregroundColor: LinLinkColors.onSecondaryContainer,
+                        ),
+                        onPressed: _openPhoneReceiveDialog,
+                        icon: const Icon(Icons.qr_code, size: 18),
+                        label: const Text('Receive Files'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _openScanner,
+                        icon: const Icon(Icons.send_rounded, size: 16),
+                        label: const Text('Send to Phone'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 24),
 
           // Feature Architecture Highlights
@@ -869,6 +1156,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
   Widget _buildLinkedHomeView() {
     final comp = _pairedCompanion!;
     final isLiveSync = ClipboardService.isAutoSyncRunning;
+    final isPhonePeer = comp.port == 7879 ||
+        comp.deviceName.toLowerCase().contains('phone') ||
+        comp.deviceName.toLowerCase().contains('android') ||
+        comp.deviceName.toLowerCase().contains('mobile');
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
@@ -895,7 +1186,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                         color: LinLinkColors.surfaceContainerHigh,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.computer, color: LinLinkColors.primary, size: 22),
+                      child: Icon(isPhonePeer ? Icons.phone_android : Icons.computer, color: LinLinkColors.primary, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -967,9 +1258,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
 
           const SizedBox(height: 14),
 
-          // Quick Action Grid (Send Note & Browse Files)
+          // Quick Action Grid (Share Files, Send Note, Browse Files)
           Row(
             children: [
+              Expanded(
+                child: InkWell(
+                  onTap: _pickAndShareFiles,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: LinLinkColors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: LinLinkColors.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.upload_file, color: LinLinkColors.primary, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Share Files', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                              Text(isPhonePeer ? 'Send to ${comp.deviceName}' : 'Send to Linux', style: const TextStyle(fontSize: 11, color: LinLinkColors.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: InkWell(
                   onTap: _showSendNoteDialog,
@@ -983,44 +1304,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.edit_note, color: LinLinkColors.primary, size: 22),
+                        Icon(Icons.edit_note, color: LinLinkColors.secondary, size: 22),
                         SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('Send Note', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                              Text('Push .txt to Linux', style: TextStyle(fontSize: 11, color: LinLinkColors.onSurfaceVariant)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: InkWell(
-                  onTap: () => setState(() => _currentTabIndex = 1),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: LinLinkColors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: LinLinkColors.outlineVariant),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.folder_open, color: LinLinkColors.secondary, size: 22),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Remote Files', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                              Text('Browse & Transfer', style: TextStyle(fontSize: 11, color: LinLinkColors.onSurfaceVariant)),
+                              Text('Push .txt text', style: TextStyle(fontSize: 11, color: LinLinkColors.onSurfaceVariant)),
                             ],
                           ),
                         ),
@@ -1030,6 +1321,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                 ),
               ),
             ],
+          ),
+
+          const SizedBox(height: 10),
+
+          // Privacy Protection Mode Banner
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: LinLinkColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: LinLinkColors.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  AndroidFileAgent.allowRemoteBrowsing ? Icons.folder_shared : Icons.shield_outlined,
+                  size: 18,
+                  color: AndroidFileAgent.allowRemoteBrowsing ? Colors.amber : LinLinkColors.secondary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AndroidFileAgent.allowRemoteBrowsing
+                            ? 'Remote Browsing: ALLOWED'
+                            : 'Privacy Mode: Active',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AndroidFileAgent.allowRemoteBrowsing ? Colors.amber : LinLinkColors.secondary,
+                        ),
+                      ),
+                      Text(
+                        AndroidFileAgent.allowRemoteBrowsing
+                            ? 'Linux can view phone directory tree'
+                            : 'Phone folders hidden from PC. Share files directly from phone.',
+                        style: const TextStyle(fontSize: 10, color: LinLinkColors.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: AndroidFileAgent.allowRemoteBrowsing,
+                  onChanged: (val) {
+                    setState(() => AndroidFileAgent.allowRemoteBrowsing = val);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          val
+                              ? 'Remote directory browsing enabled for Linux'
+                              : 'Privacy Mode enabled: Linux cannot browse phone directories',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
 
           const SizedBox(height: 16),

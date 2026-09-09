@@ -480,6 +480,36 @@ pub async fn push_clipboard_to_android(
     Ok(())
 }
 
+/// Notifies the Android agent that Linux is disconnecting so the app can
+/// immediately clear its paired state without waiting for a timeout.
+pub async fn push_disconnect_to_android(ip: &str, port: u16, token: &str) {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpStream;
+
+    let payload = serde_json::json!({ "token": token }).to_string();
+    let addr = format!("{}:{}", ip, port);
+
+    let Ok(Ok(mut stream)) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(2),
+        TcpStream::connect(&addr),
+    )
+    .await
+    else {
+        tracing::debug!("Could not reach Android agent at {} for disconnect notify", addr);
+        return;
+    };
+
+    let req = format!(
+        "POST /fs/disconnect HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        addr,
+        payload.len(),
+        payload
+    );
+
+    let _ = stream.write_all(req.as_bytes()).await;
+    info!("Sent disconnect notification to Android agent at {}", addr);
+}
+
 async fn handle_unlink(
     State(state): State<Arc<DaemonServerState>>,
     Json(body): Json<DaemonUnlinkRequest>,
@@ -650,6 +680,14 @@ pub async fn run_daemon_server(
 
     let _ = clip_stop_tx.send(()).await;
     let _ = clipboard_worker.await;
+
+    // Notify Android immediately so it clears paired state without waiting for a timeout
+    let maybe_ip = client_ip_shared.lock().await.clone();
+    let maybe_agent_port = *agent_port_shared.lock().await;
+    if let (Some(ip), Some(agent_port)) = (maybe_ip, maybe_agent_port) {
+        info!("Notifying Android agent at {}:{} about disconnect...", ip, agent_port);
+        push_disconnect_to_android(&ip, agent_port, &token).await;
+    }
 
     // Cleanup session and record disconnect
     Storage::record_device_disconnected(&device_name);

@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../theme/linlink_theme.dart';
 import '../clipboard/clipboard_service.dart';
 import '../pairing/pairing_service.dart';
+import '../storage/file_agent.dart';
 import '../storage/storage_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -263,6 +264,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Switch(
                         value: _autoAcceptTransfers,
                         onChanged: (val) => setState(() => _autoAcceptTransfers = val),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Remote Directory Browsing', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                            SizedBox(height: 2),
+                            Text(
+                              'Allow Linux to view phone folders. Disabled by default for privacy.',
+                              style: TextStyle(fontSize: 12, color: LinLinkColors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: AndroidFileAgent.allowRemoteBrowsing,
+                        onChanged: (val) => setState(() => AndroidFileAgent.allowRemoteBrowsing = val),
                       ),
                     ],
                   ),
