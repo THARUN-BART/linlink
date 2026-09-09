@@ -110,12 +110,6 @@ jobs:
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release_assets/linlink-android-arm64-v8a-v${VERSION}.apk"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release_assets/linlink-arm64-v8a.apk"
 
-      # ── Checksums & GitHub Release Publishing ────────────────────────────────
-      - name: Generate SHA256 Checksums
-        run: |
-          cd release_assets
-          sha256sum * > SHA256SUMS.txt
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -129,12 +123,10 @@ jobs:
 
             - 📱 **Android App (APK)**: `linlink-android-arm64-v8a-v${{ github.ref_name }}.apk`
             - 🐧 **Linux Executable Tarball**: `linlink-linux-x86_64-v${{ github.ref_name }}.tar.gz`
-            - 📄 **SHA256 Checksums**: `SHA256SUMS.txt`
           files: |
             release_assets/linlink-android-*.apk
             release_assets/linlink-linux-x86_64-v*.tar.gz
             release_assets/linlink-v*-x86_64
-            release_assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
