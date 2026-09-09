@@ -321,10 +321,7 @@ async fn handle_ls(client: &reqwest_compat::Client, base_url: &str, token: &str,
                         path,
                         entries.len()
                     );
-                    println!(
-                        "    {:<5} {:<32} {:>10}   {}",
-                        "TYPE", "NAME", "SIZE", "MODIFIED"
-                    );
+                    println!("    {:<5} {:<32} {:>10}   MODIFIED", "TYPE", "NAME", "SIZE");
                     println!(
                         "    ──────────────────────────────────────────────────────────────────"
                     );
@@ -612,7 +609,7 @@ pub mod reqwest_compat {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct Client;
 
     impl Client {
