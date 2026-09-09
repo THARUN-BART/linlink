@@ -2,14 +2,14 @@
 
 > **High-Performance Rust Daemon, CLI Suite, and Interactive Android Storage Shell.**
 
-The **Linux Companion** (`linux-companion`) is the core backend of LinLink on the Linux host. Written in modern Rust (Edition 2024), it provides an asynchronous HTTP daemon (Axum), local network IP discovery, terminal ANSI QR code generation, native Wayland/X11 clipboard synchronization, and an interactive terminal shell to browse and transfer files with connected Android devices.
+The **Linux Companion** is the core backend of LinLink on the Linux host. Written in modern Rust (Edition 2024), it provides an asynchronous HTTP daemon (Axum), local network IP discovery, terminal ANSI QR code generation, native Wayland/X11 clipboard synchronization, an interactive terminal shell to browse Android storage, and **instant disconnect notification** pushed to the Android app on shutdown.
 
 ---
 
 ## 📑 Table of Contents
 
 - [Architecture & Modules](#-architecture--modules)
-- [Comprehensive Function & Module Reference](#-comprehensive-function--module-reference)
+- [Module Reference](#-module-reference)
   - [1. CLI Engine (`src/cli/`)](#1-cli-engine-srccli)
   - [2. Interactive Shell REPL (`src/cli/shell.rs`)](#2-interactive-shell-repl-srcclishellrs)
   - [3. Background Daemon Server (`src/daemon/server.rs`)](#3-background-daemon-server-srcdaemonserverrs)
@@ -18,7 +18,9 @@ The **Linux Companion** (`linux-companion`) is the core backend of LinLink on th
   - [6. Storage & State Persistence (`src/storage.rs`)](#6-storage--state-persistence-srcstoragers)
   - [7. Device Management & Models (`src/device/`)](#7-device-management--models-srcdevice)
 - [Daemon HTTP API Endpoint Reference](#-daemon-http-api-endpoint-reference)
+- [Android Agent HTTP API Reference](#-android-agent-http-api-reference)
 - [Building & Installation](#-building--installation)
+- [systemd Service Setup](#-systemd-service-setup)
 - [Configuration & File Locations](#-configuration--file-locations)
 
 ---
@@ -29,17 +31,18 @@ The **Linux Companion** (`linux-companion`) is the core backend of LinLink on th
 linux-companion/src/
 ├── main.rs                 # CLI entry point, tracing & tokio initialization
 ├── lib.rs                  # Library crate root & module declarations
-├── storage.rs              # File system persistence (JSON config, logs, transfers)
+├── storage.rs              # Filesystem persistence (JSON config, logs, transfers)
 ├── cli/
 │   ├── mod.rs              # CLI module exports
 │   ├── args.rs             # Clap CLI argument & command schemas
 │   ├── runner.rs           # Subcommand execution router & dispatch
-│   ├── shell.rs            # Interactive Android storage terminal shell
+│   ├── shell.rs            # Interactive Android storage terminal shell REPL
 │   └── ui.rs               # Terminal UI, tables, banners & formatting
 ├── daemon/
 │   ├── mod.rs              # Daemon module exports
 │   ├── process.rs          # Background daemon process spawning & lifecycle
-│   └── server.rs           # Axum HTTP/TCP daemon & live clipboard monitor
+│   └── server.rs           # Axum HTTP/TCP daemon, clipboard monitor,
+│                           #   push_disconnect_to_android()
 ├── device/
 │   ├── mod.rs              # Device module exports
 │   ├── manager.rs          # Device registry queries & active session resolution
@@ -55,194 +58,193 @@ linux-companion/src/
 
 ---
 
-## 🔍 Comprehensive Function & Module Reference
+## 🔍 Module Reference
 
 ### 1. CLI Engine (`src/cli/`)
 
-#### [`src/cli/args.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/cli/args.rs)
+#### `src/cli/args.rs`
 Defines command-line parsing using `clap` (Derive API):
-- `struct Cli`: Global CLI options including `--debug` / `-d` for verbose logging.
+- `struct Cli`: Global options including `--debug` / `-d` for verbose logging.
 - `enum Commands`:
   - `Pair { host, port, foreground }`: Starts pairing server.
   - `Status`: Shows active link and device details.
-  - `Devices { current, past, remove }`: Lists or deletes paired devices.
-  - `Stop { device }`: Stops the running daemon.
+  - `Devices { current, past, remove }`: Lists or removes paired devices.
+  - `Stop { device }`: Stops the running daemon and notifies Android.
   - `Shell { device }`: Opens interactive terminal shell with Android.
   - `Logs { lines, follow }`: Inspects companion background logs.
   - `Clipboard { text }`: Gets or sets shared clipboard.
   - `Files`: Lists transfers folder contents.
-  - `Daemon { ... }`: Hidden command used by `process.rs` to spawn detached daemon.
+  - `Daemon { ... }`: Hidden command used by `process.rs` to spawn the detached daemon.
 
-#### [`src/cli/runner.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/cli/runner.rs)
+#### `src/cli/runner.rs`
 Primary subcommand router and executor:
-- `pub async fn run_cli(cli: Cli)`: Entry router matching subcommands.
-- `async fn run_pair(host: String, port: u16, foreground: bool)`:
-  - Resolves local LAN IP via `get_local_ip()`.
-  - Generates secure session token and session ID (`uuid::Uuid::new_v4()`).
-  - Launches ephemeral pairing server (`run_pairing_server`).
-  - Upon device handshake, detaches background daemon process (unless `--foreground`).
-- `async fn run_status()`: Queries running daemon `/status` endpoint or loads `session.json`, displaying uptime, device name, and socket addresses.
-- `fn run_devices(current: bool, past: bool, remove: Option<String>)`: Loads `devices.json`, formats tabular device history, or removes records.
-- `async fn run_stop(device: Option<String>)`: Sends `/pair/unlink` HTTP request to daemon; falls back to terminating background process PID.
-- `fn run_logs(lines: usize, follow: bool)`: Reads `linlink.log`. If `follow` is set, dynamically tails new output.
+- `async fn run_pair(host, port, foreground)`: Resolves LAN IP, generates session token, launches ephemeral pairing server, on handshake spawns background daemon.
+- `async fn run_status()`: Queries daemon `/status` or loads `session.json`.
+- `fn run_devices(current, past, remove)`: Formats tabular device history.
+- `fn run_stop(device_filter)`: Sends SIGTERM to daemon PID (daemon then pushes `/fs/disconnect` to Android before exiting).
+- `fn run_logs(lines, follow)`: Reads/tails `linlink.log`.
 
-#### [`src/cli/ui.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/cli/ui.rs)
-Terminal formatting and visual indicators:
-- `print_banner()`: Displays ASCII LinLink banner.
-- `print_success(msg)`, `print_warning(msg)`, `print_error(msg)`, `print_info(msg)`: Colored status outputs.
-- `format_table(...)`: Helper to align and print tabular data cleanly.
+#### `src/cli/ui.rs`
+Terminal formatting:
+- `print_banner()`: ASCII LinLink banner.
+- `print_success/warning/error/info(msg)`: Colored outputs.
+- `format_table(...)`: Aligned tabular data.
 
 ---
 
 ### 2. Interactive Shell REPL (`src/cli/shell.rs`)
 
-Launches a terminal environment directly connected to the Android device's storage agent:
+Terminal environment directly connected to the Android device's storage agent:
 
-- `pub async fn run_shell(device_filter: Option<String>)`: Main REPL loop reading user commands, tracking `current_dir` (defaults to `/storage/emulated/0`), and maintaining command prompt `📱 <Device> [<Path>] >`.
-- `async fn handle_ls(client, base_url, token, target_path)`: Requests `/fs/list` from Android, parsing JSON entries and formatting directories and files with size and modification date.
-- `async fn verify_dir(client, base_url, token, path) -> bool`: Verifies directory exists on Android before updating shell working directory.
-- `async fn handle_get(client, base_url, token, remote_path, local_dest)`: Streams file from Android (`/fs/download`) to Linux disk (`~/Downloads/LinLink/` or specified path).
-- `async fn handle_put(client, base_url, token, local_path, remote_dir, remote_filename)`: Reads local file and streams bytes to Android (`/fs/upload`).
-- `async fn handle_cat(client, base_url, token, remote_path)`: Fetches remote file (`/fs/download`) and prints UTF-8 lines directly in the Linux terminal.
-- `async fn handle_mkdir(client, base_url, token, path)`: Sends directory creation request to Android (`/fs/mkdir`).
-- `async fn handle_rm(client, base_url, token, path)`: Sends deletion request to Android (`/fs/delete`).
-- `fn resolve_path(current, target) -> String`: Resolves relative paths (`..`, subfolders, `~`, `@`) into absolute Android storage paths.
-- `fn normalize_path(path) -> String`: Cleans up redundant slashes and handles parent directory segments (`/../`).
-- `fn format_bytes(bytes: u64) -> String`: Formats raw bytes into human-readable B, KB, MB, GB.
-- `mod reqwest_compat`: Lightweight asynchronous HTTP 1.1 client implemented with raw `tokio::net::TcpStream` to avoid heavy external HTTP client dependencies.
-  - `Client::get(url)`, `Client::post(url)`
-  - `RequestBuilder::body(vec)`
-  - `RequestBuilder::send()`: Handles TCP connect, HTTP headers, chunked transfer-encoding decoding, and timeouts.
+- `pub async fn run_shell(device_filter)`: Main REPL loop. Prompt: `📱 <Device> [<Path>] >`.
+- `handle_ls(...)`: Requests `/fs/list` from Android, formats directory listing.
+- `verify_dir(...)`: Validates directory exists before `cd`.
+- `handle_get(...)`: Streams file from Android `/fs/download` to `~/Downloads/LinLink/`.
+- `handle_put(...)`: Streams local file to Android via `/fs/upload`.
+- `handle_cat(...)`: Fetches and prints remote text file in terminal.
+- `handle_mkdir(...)`: Creates directory on Android via `/fs/mkdir`.
+- `handle_rm(...)`: Deletes file or directory via `/fs/delete`.
+- `resolve_path(current, target)`: Resolves relative paths (`..`, `~`, `@`) to absolute Android paths.
+- `format_bytes(u64)`: Human-readable B / KB / MB / GB.
+- `mod reqwest_compat`: Lightweight async HTTP client over raw `TcpStream` (no heavy dependencies).
 
 ---
 
 ### 3. Background Daemon Server (`src/daemon/server.rs`)
 
-The background Axum server providing TCP endpoints for the Android mobile app:
+The background Axum HTTP server providing all TCP endpoints for the Android app.
 
-#### Core Lifecycle & State
-- `struct DaemonServerState`:
-  - `session_id: String`: Active session UUID.
-  - `host: String`, `port: u16`: Listening network parameters.
-  - `token: String`: Authentication token.
-  - `device_name: String`: Connected device friendly name.
-  - `shutdown_tx: mpsc::Sender<()>`: Graceful shutdown signal channel.
-  - `last_synced_clipboard: Arc<Mutex<String>>`: Tracks last synchronized clipboard text to prevent echo loops.
-  - `client_ip: Arc<Mutex<Option<String>>>`: Android device IP address (dynamically updated from connection info).
-  - `agent_port: Arc<Mutex<Option<u16>>>`: Android file agent TCP port (registered dynamically).
-- `pub async fn run_daemon_server(...)`:
-  - Binds TCP listener (`0.0.0.0:<port>`).
-  - Sets up routes and max body limit (10 GB for large file uploads).
-  - Spawns the asynchronous `clipboard_worker`.
-  - Installs UNIX signal handlers for `SIGTERM` and `SIGINT`.
-  - Cleans up `session.json` and records disconnect upon exit.
+#### Core State — `DaemonServerState`
+| Field | Type | Purpose |
+| :--- | :--- | :--- |
+| `session_id` | `String` | Active session UUID |
+| `host` / `port` | `String` / `u16` | Listening address |
+| `token` | `String` | Auth token for all requests |
+| `device_name` | `String` | Connected Android device name |
+| `shutdown_tx` | `mpsc::Sender<()>` | Graceful shutdown channel |
+| `last_synced_clipboard` | `Arc<Mutex<String>>` | Dedup clipboard state |
+| `client_ip` | `Arc<Mutex<Option<String>>>` | Android IP (updated dynamically) |
+| `agent_port` | `Arc<Mutex<Option<u16>>>` | Android file agent port |
 
 #### Clipboard Synchronization Engine
-- `pub fn read_system_clipboard() -> Option<String>`:
-  - **Wayland**: Executes `wl-paste -n` to capture text from the Wayland compositor.
-  - **X11**: Falls back to `xclip -selection clipboard -o` or `xsel --clipboard --output`.
-- `pub fn copy_to_system_clipboard(text: &str)`:
-  - **Wayland**: Pipes text to `wl-copy` via standard input.
-  - **X11**: Pipes text to `xclip -selection clipboard`.
-- `pub async fn push_clipboard_to_android(ip, port, token, text) -> Result<(), String>`:
-  - Opens direct TCP connection to the Android phone's `AndroidFileAgent` (`POST /fs/clipboard`).
-  - Delivers new clipboard text immediately with timeout protection.
-- `clipboard_worker`:
-  - Runs in a background Tokio task ticking every 800ms.
-  - Checks `read_system_clipboard()`. When new text is detected, updates `last_synced_clipboard`, persists to disk, and triggers `push_clipboard_to_android`.
+- `read_system_clipboard()`: Wayland → `wl-paste -n`; X11 → `xclip` / `xsel`.
+- `copy_to_system_clipboard(text)`: Wayland → `wl-copy`; X11 → `xclip`.
+- `push_clipboard_to_android(ip, port, token, text)`: TCP `POST /fs/clipboard` to Android agent with 2s timeout.
+- `clipboard_worker`: Background Tokio task polling every 800ms. Pushes changes to Android automatically.
+
+#### Instant Disconnect — `push_disconnect_to_android()` *(new)*
+- Called **before** every shutdown path (SIGTERM, SIGINT, HTTP unlink).
+- Sends `POST /fs/disconnect` to the Android agent (2s timeout).
+- Android receives it and immediately clears its paired state, stops sync, and returns to the connect screen — no polling required.
 
 #### HTTP Handler Functions
-- `handle_status(State)`: Returns JSON `DaemonStatusResponse`.
-- `handle_ping()`: Returns `{"status": "pong"}`.
-- `handle_device_register(State, ConnectInfo, Json)`: Receives Android's `agent_port` and records client IP.
-- `handle_get_clipboard(State, ConnectInfo)`: Serves Linux clipboard text to Android (syncs with fresh system clipboard).
-- `handle_post_clipboard(State, ConnectInfo, Json)`: Receives clipboard text from Android, updates Linux system clipboard, and prevents loopback.
-- `handle_list_files()`: Lists received files in `~/Downloads/LinLink/`.
-- `handle_file_upload(State, Json)`: Saves single note or text upload.
-- `handle_fs_list(State, Json)`: Lists Linux filesystem entries for Android remote file browser.
-- `handle_fs_download(State, Query)`: Streams Linux file to Android over TCP with `Content-Disposition`.
-- `handle_fs_upload(State, Query, Bytes)`: Receives streamed file upload from Android and writes to Linux directory.
-- `handle_unlink(State, Json)`: Sends shutdown signal to daemon server.
+| Handler | Route | Description |
+| :--- | :--- | :--- |
+| `handle_status` | `GET /status` | Returns JSON daemon state |
+| `handle_ping` | `GET /ping` | Health check → `{"status":"pong"}` |
+| `handle_device_register` | `POST /api/device/register` | Android registers its agent port |
+| `handle_get_clipboard` | `GET /clipboard` | Serves current Linux clipboard |
+| `handle_post_clipboard` | `POST /clipboard` | Receives clipboard from Android, updates Linux |
+| `handle_list_files` | `GET /files` | Lists `~/Downloads/LinLink/` |
+| `handle_file_upload` | `POST /files/upload` | Saves text/note upload |
+| `handle_fs_list` | `POST /api/fs/list` | Lists Linux directory for Android browser |
+| `handle_fs_download` | `GET /api/fs/download` | Streams Linux file to Android |
+| `handle_fs_upload` | `POST /api/fs/upload` | Receives file from Android |
+| `handle_unlink` | `POST /pair/unlink` | Sends shutdown signal + pushes disconnect to Android |
 
 ---
 
 ### 4. Daemon Process Management (`src/daemon/process.rs`)
 
-Handles detaching the daemon into an independent operating system background process:
-- `pub fn spawn_daemon_process(host, port, token, session_id, device_name, client_ip) -> Result<u32, ...>`:
+- `DaemonProcess::spawn(host, port, token, session_id, device_name, client_ip)`:
   - Spawns current executable with hidden `daemon` subcommand.
-  - Redirects standard output and error to `~/.config/linlink/linlink.log`.
-  - Detaches process so it outlives the pairing CLI command.
-- `pub fn stop_daemon_process(pid: u32) -> bool`:
-  - Sends `SIGTERM` (15) to PID; verifies termination using `/proc/<pid>`.
+  - Redirects stdout/stderr to `~/.config/linlink/linlink.log`.
+  - Detaches process (outlives the pairing CLI command).
+- `DaemonProcess::stop(device_filter) -> StopOutcome`:
+  - Loads `session.json`, verifies PID liveness.
+  - Sends `SIGTERM` to daemon PID → daemon's shutdown path then calls `push_disconnect_to_android`.
+  - Returns `Stopped`, `DeviceMismatch`, `DeviceAlreadyDisconnected`, `DeviceNotFound`, or `NotRunning`.
 
 ---
 
 ### 5. Pairing & Network Engine (`src/pairing/`)
 
-- [`src/pairing/network.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/pairing/network.rs):
-  - `pub fn get_local_ip() -> Option<String>`: Iterates local network interfaces using UDP socket discovery to find active LAN IPv4 address (e.g. `192.168.x.x`).
-- [`src/pairing/qr.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/pairing/qr.rs):
-  - `pub fn generate_qr_string(payload: &str) -> Result<String, ...>`: Encodes pairing URL payload (`linlink://pair?host=...&port=...&token=...`) into terminal ANSI block characters (`█`, `▀`, `▄`).
-  - `pub fn print_qr_code(payload: &str)`: Renders formatted QR code in terminal with border and instructions.
-- [`src/pairing/server.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/pairing/server.rs):
-  - `pub async fn run_pairing_server(...)`: Runs ephemeral Axum HTTP server on port 7878 while user scans the QR code.
-  - `handle_pair_request(...)`: Handles `POST /pair` from Android app, validates pairing token, and registers device name.
+- `network.rs` — `get_local_ip()`: UDP socket trick to discover active LAN IPv4 address.
+- `qr.rs` — `generate_qr_string(payload)`: Encodes `linlink://pair?host=...&port=...&token=...` into ANSI block characters (`█`, `▀`, `▄`).
+- `server.rs` — `run_pairing_server(...)`: Ephemeral Axum server on port 7878 while user scans QR. Handles `POST /pair/scan` and `POST /pair/handshake`.
+- `session.rs` — Session token generation and UUID v4 session IDs.
+- `state.rs` — Pairing state transitions (`Pairing → Waiting → Connected → Stopped`).
 
 ---
 
 ### 6. Storage & State Persistence (`src/storage.rs`)
 
-Provides path resolution, JSON serialization, and filesystem persistence:
-
-- `Storage::config_dir() -> PathBuf`: Resolves `~/.config/linlink` (or `$LINLINK_CONFIG_DIR`).
-- `Storage::log_file() -> PathBuf`: Path to `linlink.log`.
-- `Storage::devices_file() -> PathBuf`: Path to `devices.json`.
-- `Storage::session_file() -> PathBuf`: Path to `session.json`.
-- `Storage::clipboard_file() -> PathBuf`: Path to `clipboard.txt`.
-- `Storage::transfers_dir() -> PathBuf`: Path to `~/Downloads/LinLink/`.
-- `Storage::load_devices() -> Vec<PairedDevice>`: Reads paired devices list.
-- `Storage::save_device(PairedDevice)`: Upserts device into registry.
-- `Storage::record_device_connected(name, token, ip)`: Updates `last_seen` timestamp and IP.
-- `Storage::record_device_disconnected(name_or_token)`: Updates `disconnected_at` timestamp.
-- `Storage::remove_device(id_or_name) -> bool`: Deletes device from registry.
-- `Storage::save_session(&ActiveSession)`, `load_session()`, `clear_session()`: Session persistence.
-- `Storage::save_clipboard(text)`, `load_clipboard()`: Persists clipboard snapshot.
-- `Storage::is_pid_alive(pid) -> bool`: Inspects `/proc/<pid>/status` ensuring process is not Zombie (`Z`) or Dead (`X`).
-- `Storage::find_running_daemon_pids() -> Vec<u32>`: Scans `/proc` for existing `linlink daemon` processes.
-- `pub fn current_timestamp() -> String`: UTC formatted timestamp string (`YYYY-MM-DD HH:MM:SS UTC`).
+| Function | Description |
+| :--- | :--- |
+| `Storage::config_dir()` | `~/.config/linlink` (or `$LINLINK_CONFIG_DIR`) |
+| `Storage::log_file()` | `linlink.log` path |
+| `Storage::devices_file()` | `devices.json` path |
+| `Storage::session_file()` | `session.json` path |
+| `Storage::clipboard_file()` | `clipboard.txt` path |
+| `Storage::transfers_dir()` | `~/Downloads/LinLink/` |
+| `Storage::load/save_devices()` | Paired device registry CRUD |
+| `Storage::record_device_connected/disconnected()` | Timestamp tracking |
+| `Storage::save/load/clear_session()` | Active session persistence |
+| `Storage::save/load_clipboard()` | Clipboard snapshot persistence |
+| `Storage::is_pid_alive(pid)` | `/proc/<pid>/status` liveness check |
+| `Storage::find_running_daemon_pids()` | Scans `/proc` for orphaned daemons |
+| `current_timestamp()` | `YYYY-MM-DD HH:MM:SS UTC` string |
 
 ---
 
 ### 7. Device Management & Models (`src/device/`)
 
-- [`src/device/model.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/device/model.rs):
-  - `struct PairedDevice`: `{ id, name, token, paired_at, last_seen, disconnected_at, ip }`.
-  - `struct ActiveSession`: `{ pid, host, port, token, state, device_name, client_ip, agent_port, started_at }`.
-  - `struct ConnectedDeviceInfo`: DTO returned by `DeviceManager`.
-- [`src/device/manager.rs`](file:///home/bart-simpson/StudioProjects/linlink/linux-companion/src/device/manager.rs):
-  - `DeviceManager::get_current_device() -> Option<ConnectedDeviceInfo>`: Validates PID liveness and returns active linked device.
-  - `DeviceManager::get_all_devices() -> Vec<ConnectedDeviceInfo>`: Combines active session with historical devices list.
+- `model.rs`:
+  - `PairedDevice`: `{ id, name, token, paired_at, last_seen, disconnected_at, ip }`
+  - `ActiveSession`: `{ pid, host, port, token, state, device_name, client_ip, agent_port, started_at }`
+  - `ConnectedDeviceInfo`: DTO returned by `DeviceManager`
+- `manager.rs`:
+  - `DeviceManager::get_current_device()`: Validates PID liveness and returns active device.
+  - `DeviceManager::get_all_devices()`: Combines active session + device history.
 
 ---
 
 ## 🌐 Daemon HTTP API Endpoint Reference
 
-All endpoints requiring authentication expect the token either in query parameters (`?token=...`), request body (`{"token": "..."}`), or `x-session-token` header.
+All authenticated endpoints accept the token in `?token=...`, request body `{"token":"..."}`, or `x-session-token` header.
 
-| Endpoint | Method | Payload / Query | Description |
+| Endpoint | Method | Auth | Description |
 | :--- | :--- | :--- | :--- |
-| `/status` | `GET` | None | Returns JSON server state, host, port, and connected device name. |
-| `/ping` | `GET` | None | Health check returning `{"status": "pong"}`. |
-| `/clipboard` | `GET` | None | Returns latest clipboard content from Linux system. |
-| `/clipboard` | `POST` | `{"token": "...", "text": "..."}` | Sets Linux system clipboard (`wl-copy`/`xclip`). |
-| `/api/device/register` | `POST` | `{"token": "...", "agent_port": 7879}` | Android registers its TCP file agent port. |
-| `/api/fs/list` | `POST` | `{"token": "...", "path": "/home/user"}` | Lists directory contents on Linux for Android. |
-| `/api/fs/download` | `GET` | `?token=...&path=/path/to/file` | Streams file from Linux to Android. |
-| `/api/fs/upload` | `POST` | `?token=...&dest_dir=...&filename=...` | Streams uploaded bytes from Android to Linux disk. |
-| `/files` | `GET` | None | Lists files in `~/Downloads/LinLink/`. |
-| `/files/upload` | `POST` | `{"token": "...", "filename": "...", "content": "..."}` | Simple file/note upload. |
-| `/pair/unlink` | `POST` | `{"token": "..."}` | Requests daemon shutdown and unlinks device. |
+| `/status` | GET | No | JSON daemon state, host, port, device name |
+| `/ping` | GET | No | `{"status":"pong"}` |
+| `/clipboard` | GET | No | Current Linux clipboard text |
+| `/clipboard` | POST | Yes | Set Linux clipboard from Android |
+| `/api/device/register` | POST | Yes | Android registers agent port |
+| `/api/fs/list` | POST | Yes | List Linux directory for Android |
+| `/api/fs/download` | GET | Yes | Stream Linux file to Android |
+| `/api/fs/upload` | POST | Yes | Receive file from Android |
+| `/files` | GET | No | List `~/Downloads/LinLink/` |
+| `/files/upload` | POST | Yes | Text / note file upload |
+| `/pair/unlink` | POST | Yes | Shutdown daemon + push `/fs/disconnect` to Android |
+
+---
+
+## 📱 Android Agent HTTP API Reference
+
+The Android app runs `AndroidFileAgent` on port 7879. The Linux shell and daemon connect directly to these endpoints:
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/fs/ping` | GET | Android health check |
+| `/pair/scan` | POST | QR scan acknowledgement |
+| `/pair/handshake` | POST | Phone-to-phone pairing handshake |
+| `/fs/disconnect` | POST | **Instant disconnect from Linux** — clears Android paired state immediately *(new)* |
+| `/fs/list` | POST | List Android directory (Privacy Mode must be enabled) |
+| `/fs/download` | GET | Download file from Android (Privacy Mode must be enabled) |
+| `/fs/upload` | POST | Receive file upload from Linux |
+| `/fs/clipboard` | POST | Receive clipboard push from Linux |
+| `/fs/mkdir` | POST | Create directory on Android |
+| `/fs/delete` | POST | Delete file or directory on Android |
 
 ---
 
@@ -255,11 +257,14 @@ cargo build
 # Optimized release binary
 cargo build --release
 
-# Install globally
+# Install to user PATH (no sudo required)
+cp target/release/linlink ~/.local/bin/
+
+# Or install system-wide
 sudo cp target/release/linlink /usr/local/bin/
 ```
 
-Verify installation:
+Verify:
 ```bash
 linlink --version
 linlink --help
@@ -267,10 +272,50 @@ linlink --help
 
 ---
 
+## 🖥 systemd Service Setup
+
+A `systemd` user service allows `linlink` to auto-start on login without root:
+
+```ini
+# ~/.config/systemd/user/linlink.service
+[Unit]
+Description=LinLink Android-Linux Companion Bridge
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/linlink daemon
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/.config/linlink/linlink.log
+StandardError=append:%h/.config/linlink/linlink.log
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable linlink
+systemctl --user start linlink
+
+# Service control
+systemctl --user status linlink
+systemctl --user stop linlink
+journalctl --user -u linlink -f
+```
+
+---
+
 ## 📂 Configuration & File Locations
 
-- **Log File**: `~/.config/linlink/linlink.log`
-- **Active Session**: `~/.config/linlink/session.json`
-- **Device Registry**: `~/.config/linlink/devices.json`
-- **Shared Clipboard Cache**: `~/.config/linlink/clipboard.txt`
-- **Received Transfers Folder**: `~/Downloads/LinLink/`
+| Path | Purpose |
+| :--- | :--- |
+| `~/.config/linlink/linlink.log` | Daemon log output |
+| `~/.config/linlink/session.json` | Active session state |
+| `~/.config/linlink/devices.json` | Paired device registry |
+| `~/.config/linlink/clipboard.txt` | Last synced clipboard snapshot |
+| `~/Downloads/LinLink/` | Received file transfers |
+| `~/.config/systemd/user/linlink.service` | systemd user service unit |
+| `~/.local/bin/linlink` | Installed binary |

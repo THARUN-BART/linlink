@@ -1,0 +1,157 @@
+name: Release Package
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ── Rust Linux Binary Build ──────────────────────────────────────────────
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Restore Cargo Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            linux-companion/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('linux-companion/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check Formatting (Rust)
+        working-directory: linux-companion
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy (Rust)
+        working-directory: linux-companion
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run Tests (Rust)
+        working-directory: linux-companion
+        run: cargo test --locked
+
+      - name: Build Linux Release
+        working-directory: linux-companion
+        run: cargo build --release --locked
+
+      - name: Verify Linux Binary
+        working-directory: linux-companion
+        run: |
+          test -f target/release/linlink
+          file target/release/linlink
+          chmod +x target/release/linlink
+
+      - name: Package Linux Tarball & Binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release_assets/linlink-linux-x86_64
+
+          cp linux-companion/target/release/linlink release_assets/linlink-linux-x86_64/
+
+          if [ -f README.md ]; then
+            cp README.md release_assets/linlink-linux-x86_64/
+          fi
+
+          if [ -f LICENSE ]; then
+            cp LICENSE release_assets/linlink-linux-x86_64/
+          fi
+
+          tar -czf \
+            "release_assets/linlink-linux-x86_64-v${VERSION}.tar.gz" \
+            -C release_assets \
+            linlink-linux-x86_64
+
+          # Direct standalone binary upload
+          cp linux-companion/target/release/linlink "release_assets/linlink-v${VERSION}-x86_64"
+
+      # ── Flutter Android APK Build ───────────────────────────────────────────
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build Android Release APK (ARM64-v8a)
+        run: flutter build apk --release --target-platform android-arm,android-arm64,android-x64 --split-per-abi
+
+      - name: Copy ARM64-v8a APK to Release Assets
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release_assets/linlink-android-arm64-v8a-v${VERSION}.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "release_assets/linlink-arm64-v8a.apk"
+
+      # ── Checksums & GitHub Release Publishing ────────────────────────────────
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release_assets
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          body: |
+            ## LinLink Release ${{ github.ref_name }}
+
+            Seamless, fast, and secure companion bridge between Android and Linux.
+
+            ### Downloads
+
+            - 📱 **Android App (APK)**: `linlink-android-arm64-v8a-v${{ github.ref_name }}.apk`
+            - 🐧 **Linux Executable Tarball**: `linlink-linux-x86_64-v${{ github.ref_name }}.tar.gz`
+            - 📄 **SHA256 Checksums**: `SHA256SUMS.txt`
+          files: |
+            release_assets/linlink-android-*.apk
+            release_assets/linlink-linux-x86_64-v*.tar.gz
+            release_assets/linlink-v*-x86_64
+            release_assets/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── SourceForge Upload ──────────────────────────────────────────────────
+      - name: Upload Release Artifacts to SourceForge
+        env:
+          SF_USER: ${{ secrets.SF_USERNAME }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+        run: |
+          if [ -n "$SF_USER" ] && [ -n "$SF_PROJECT" ]; then
+            mkdir -p ~/.ssh
+            echo "${{ secrets.SF_SSH_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan frs.sourceforge.net >> ~/.ssh/known_hosts
+
+            VERSION="${GITHUB_REF_NAME#v}"
+            # Create remote version directory and sync release assets to SourceForge FRS
+            ssh $SF_USER@frs.sourceforge.net "mkdir -p /home/frs/project/$SF_PROJECT/v${VERSION}"
+            rsync -avz release_assets/ $SF_USER@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/v${VERSION}/
+            rsync -avz release_assets/ $SF_USER@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/
+          else
+            echo "SourceForge secrets not configured. Skipping SourceForge upload."
+          fi
+
