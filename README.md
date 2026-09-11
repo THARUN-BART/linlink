@@ -4,227 +4,238 @@
 
 # LinLink 🔗📱💻
 
-> **Seamless, Fast, and Secure Companion Bridge between Android and Linux.**
+> **Seamless, Fast, and Secure Companion Bridge between Android and Linux (and Phone-to-Phone).**
 
-LinLink connects your Android smartphone and Linux computer over your local network (LAN / Wi-Fi) with zero cloud dependency. Pair in seconds using a terminal QR code, synchronize your clipboard in real-time both ways, transfer files seamlessly, browse Linux files from your phone, and explore your phone's storage through an interactive Linux terminal shell.
+LinLink connects your Android smartphones and Linux computers over your local network (LAN / Wi-Fi / Hotspot) with **zero cloud dependency** and **zero internet usage**. Pair in seconds using a terminal QR code, synchronize your clipboard in real-time both ways, transfer files seamlessly with sender-first QR pairing, browse Linux files from your phone, and explore your phone's storage through an interactive Linux terminal shell.
 
 ---
 
 ## 📑 Table of Contents
 
-- [Overview & Architecture](#-overview--architecture)
-- [📱 Flutter Screens](#-flutter-screens)
-- [🔄 How Flutter Connects to Linux](#-how-flutter-connects-to-linux)
-- [✨ Key Features](#-key-features)
-- [🐧 Rust Linux Companion Reference](#-rust-linux-companion-reference)
-- [Prerequisites](#-prerequisites)
-- [Quickstart Guide](#-quickstart-guide)
-- [CLI Reference Manual](#-cli-reference-manual)
-- [Interactive Shell Commands](#-interactive-shell-commands)
-- [File Storage Locations](#-file-storage-locations)
-- [Project Directory Structure](#-project-directory-structure)
-- [Security & Privacy](#-security--privacy)
+- [🏛 Architecture Overview](#-architecture-overview) ([Full Document](ARCHITECTURE.md))
+  - [📱 Mobile Architecture & Flutter Engine](#-mobile-architecture--flutter-engine)
+  - [🐧 Linux Companion Architecture](#-linux-companion-architecture)
+  - [🔄 How Mobile Connects to Linux & Peers](#-how-mobile-connects-to-linux--peers)
+- [📥 Installation Guide](#-installation-guide) ([Full Document](INSTALL.md))
+  - [🐧 Linux Installation (One-Liner / Script)](#-linux-installation)
+  - [📱 Android Installation](#-android-installation)
+  - [🛠 Building from Source](#-building-from-source)
+- [✨ Key Features & Capabilities](#-key-features--capabilities)
+- [🛠 CLI & Shell Reference Manual](#-cli--shell-reference-manual)
+- [📁 File Storage Locations](#-file-storage-locations)
+- [📂 Project Directory Structure](#-project-directory-structure)
+- [🔒 Security & Privacy](#-security--privacy)
+- [🤝 Contribution Guide](#-contribution-guide) ([Full Document](CONTRIBUTING.md))
+- [📄 License](#-license)
 
 ---
 
-## 🏛 Overview & Architecture
+## 🏛 Architecture Overview
 
-LinLink consists of two synchronized components operating over high-performance local TCP:
+LinLink consists of modular, zero-cloud components operating over high-performance local TCP:
 
 ```
 ┌────────────────────────────────────────────────────────┐
 │                   Android Device                       │
-│  • Flutter UI — Floating Glass Navigation Bar          │
+│  • Flutter UI — Floating Glass Navigation Bar (M3)     │
 │  • AndroidFileAgent (HTTP/TCP Server on Port 7879)     │
-│  • Native File Manager Picker (SAF) + Storage Fallback │
-│  • Continuous Live Clipboard Service                   │
-│  • Instant disconnect via /fs/disconnect endpoint      │
+│  • Native SAF FilePicker + Storage Staging Pipeline    │
+│  • Persistent Foreground Clipboard Sync Service        │
+│  • Instant disconnect push (/fs/disconnect)            │
 └────────────────────────▲───────────────────────────────┘
                          │
-                    Local Wi-Fi / TCP
+                    Local Wi-Fi / Hotspot LAN / TCP
                          │
 ┌────────────────────────▼───────────────────────────────┐
 │                   Linux Machine                        │
-│  • Linux Companion CLI (linlink)                       │
+│  • Linux Companion CLI (linlink) in Rust               │
 │  • Background Axum Daemon (Port 7878)                  │
-│  • Wayland / X11 System Clipboard Engine               │
-│  • Interactive Terminal Shell Client                   │
+│  • Native Wayland / X11 System Clipboard Engine        │
+│  • Interactive Terminal Shell Client (linlink shell)   │
 │  • systemd User Service (auto-start on login)          │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📱 Flutter Screens
+### 📱 Mobile Architecture & Flutter Engine
 
-### `HomeScreen` — [`lib/features/home/home_screen.dart`](lib/features/home/home_screen.dart)
-Central dashboard with a **floating pill-shaped glass navigation bar** (`BackdropFilter` + `ImageFilter.blur(20,20)`, semi-transparent dark tint, drop shadow, animated active-tab highlight).
+The mobile client is built with Flutter and structured around decoupled, feature-driven modules:
 
-- **Unpaired**: App icon hero (`assets/icon.png`), QR scan button, manual IP entry, phone-to-phone P2P transfer card, and step-by-step Linux setup instructions.
-- **Paired**: Device status card, clipboard sync toggle + preview, Share Files / Send Note quick actions, Privacy Mode toggle.
-- **Instant disconnect**: When Linux sends `POST /fs/disconnect`, the app immediately clears paired state, stops sync, and shows a snackbar — no polling.
+- **Floating Glass UI Layer**:
+  - `HomeScreen` ([`lib/features/home/home_screen.dart`](lib/features/home/home_screen.dart)) — Modern Material 3 dashboard with frosted glass floating navigation (`BackdropFilter` blur).
+  - `PhoneSendDialog` ([`lib/features/pairing/views/phone_send_dialog.dart`](lib/features/pairing/views/phone_send_dialog.dart)) — Sender-first staging workflow: select files first, compute batch sizes, and render instant high-contrast QR codes.
+  - `ScannerScreen` ([`lib/features/scanner/views/scanner_screen.dart`](lib/features/scanner/views/scanner_screen.dart)) — Dual-mode camera QR scanner using `mobile_scanner` + BLoC. Detects `mode=p2p` for batch file downloads or standard pairing payloads.
+  - `RemoteFileBrowserScreen` ([`lib/features/storage/remote_file_browser_screen.dart`](lib/features/storage/remote_file_browser_screen.dart)) — Remote filesystem explorer with instant search and download streams.
 
-### `PairingSuccessScreen` — [`lib/features/pairing/pairing_success_screen.dart`](lib/features/pairing/pairing_success_screen.dart)
-Post-pairing confirmation showing `assets/icon.png` badge (72×72, rounded), device details, and capability tiles.
+- **Local Server Engine (`AndroidFileAgent`)**:
+  - Embedded asynchronous HTTP/TCP server running on Android (Port `7879`).
+  - Staged file queueing for sender-first P2P file downloads (`/p2p/files` & `/p2p/download`).
+  - Automatic IP discovery prioritizing Wi-Fi (`wlan0`) and Mobile Hotspot (`ap0`) interfaces.
+  - Strict Privacy Guard blocking remote folder inspection (`/fs/list`) with HTTP 403 Forbidden.
 
-### `ScannerScreen` — [`lib/features/scanner/views/scanner_screen.dart`](lib/features/scanner/views/scanner_screen.dart)
-Camera QR scanner using `mobile_scanner` + BLoC. Parses `linlink://pair?host=...&port=...&token=...` and completes handshake in under a second.
-
-### `RemoteFileBrowserScreen` — [`lib/features/storage/remote_file_browser_screen.dart`](lib/features/storage/remote_file_browser_screen.dart)
-Browse Linux filesystem from Android, download files with one tap, upload via native SAF picker.
+- **Background Services**:
+  - Foreground notification service keeping clipboard synchronization active without battery-saver interruptions.
 
 ---
 
-## 🔄 How Flutter Connects to Linux
+### 🐧 Linux Companion Architecture
+
+The Linux host utility is written in high-performance, asynchronous Rust:
+
+- **Axum Daemon Engine (`linux-companion/src/daemon/`)**:
+  - Listens on TCP Port `7878` for device registration, file streaming, and health checks.
+  - Token-authenticated session manager in `~/.config/linlink/session.json`.
+- **System Clipboard Interop (`linux-companion/src/clipboard/`)**:
+  - Zero-latency native bridge supporting Wayland (`wl-clipboard`) and X11 (`xclip`/`xsel`).
+  - Loop prevention with SHA-256 state hashing.
+- **Interactive Shell REPL (`linux-companion/src/cli/shell.rs`)**:
+  - Interactive terminal environment to navigate, read (`cat`), upload (`put`), and download (`get`) Android files directly from the Linux terminal.
+
+---
+
+### 🔄 How Mobile Connects to Linux & Peers
 
 ```
-Android (Flutter)                              Linux Host (linlink)
+Sender (Android / Linux)                        Receiver (Android / Linux)
        │                                                │
-       │  1. Scan QR → parse linlink://pair?...         │
-       │───────────────────────────────────────────────>│
+       │  1. Pick Files & Stage in Local Server         │
+       │  2. Render QR (linlink://IP:Port?t=...&mode=..)│
        │                                                │
-       │  2. POST /pair/scan + POST /pair/handshake     │
-       │───────────────────────────────────────────────>│ Port 7878
+       │  3. Scan QR with Camera Scanner                │
+       │<───────────────────────────────────────────────│
        │                                                │
-       │  3. 200 OK (token, session_id)                 │
-       │<───────────────────────────────────────────────│ Spawns background daemon
+       │  4. GET /p2p/files (List staged items)         │
+       │<───────────────────────────────────────────────│
        │                                                │
-       │  4. Start AndroidFileAgent on Port 7879        │
-       │     POST /api/device/register {agent_port}     │
-       │───────────────────────────────────────────────>│ Daemon records phone IP
-       │                                                │
-       │  5. Live Clipboard Auto-Sync (800ms poll)      │
-       │<──────────────────────────────────────────────>│
-       │                                                │
-       │  6. File operations & linlink shell            │
-       │<──────────────────────────────────────────────>│
-       │                                                │
-       │  7. linlink stop → POST /fs/disconnect         │
-       │<───────────────────────────────────────────────│ Android clears state instantly
+       │  5. Stream Downloads (/p2p/download?index=N)  │
+       │<───────────────────────────────────────────────│ All files transferred
+       │                                                │ Saved in Downloads/LinLink
 ```
 
 ---
 
-## ✨ Key Features
+## 📥 Installation Guide
 
-### 1. Real-Time Bidirectional Clipboard Sync
-- Copy on Linux → instantly on Android. Copy on Android → instantly on Linux.
-- Wayland (`wl-copy`/`wl-paste`) and X11 (`xclip`/`xsel`) native support.
-- Intelligent deduplication prevents echo loops.
+### 🐧 Linux Installation
 
-### 2. Mobile → Linux File Upload
-- Native Android SAF (`FilePicker`) or built-in storage browser fallback.
-- Streams files directly over TCP to any Linux directory.
-- Quick Text Notes: push `.txt` notes to Linux in one tap.
+#### Option 1: Quick Install via SourceForge Script (Recommended)
 
-### 3. Linux → Mobile Remote File Browser
-- Browse your Linux filesystem from the Android app.
-- One-tap download to `/storage/emulated/0/Download/LinLink/`.
+Run the following command in your Linux terminal:
 
-### 4. Interactive Linux Shell (`linlink shell`)
-Terminal REPL connected directly to your Android storage:
-`ls`, `cd`, `pwd`, `cat`, `get`, `put`, `mkdir`, `rm`, `clip`.
+```bash
+curl -L -o install.sh "https://sourceforge.net/projects/linlink/files/install.sh/download"
+chmod +x install.sh
+./install.sh
+```
 
-### 5. Zero-Config QR Code Pairing
-- ANSI QR code with auto-detected LAN IP.
-- Under-a-second handshake. Manual IP fallback available.
+*(Note: `chmod +x install.sh` or `chmod 777 install.sh` makes the installer executable).*
 
-### 6. Background Daemon & systemd Integration
-- Graceful `SIGINT`/`SIGTERM` handling.
-- `systemd` user service for auto-start on login.
-- Full session persistence in `~/.config/linlink/`.
+#### Option 2: Manual Binary Download
 
-### 7. Instant Linux Disconnect Notification *(new)*
-- `linlink stop` sends `POST /fs/disconnect` to Android **before** the process exits.
-- Android immediately clears paired state, stops sync, returns to the connect screen, and shows a snackbar — within 2 seconds, no polling.
-
-### 8. App Icon Branding *(new)*
-- `assets/icon.png` displayed in the AppBar, onboarding hero, and pairing success screen.
-
-### 9. Floating Glass Navigation Bar *(new)*
-- Pill-shaped bar with `BackdropFilter` blur, semi-transparent tint, subtle border, and drop shadow.
-- Animated active-tab pill highlight using `AnimatedContainer`.
-- Floats 20px from screen edges and above the home indicator.
+1. Download the latest Linux release tarball `linlink-linux-x86_64-v1.1.0.tar.gz` from [Releases](https://github.com/THARUN-BART/linlink/releases).
+2. Extract and copy to your local bin:
+   ```bash
+   tar -xzf linlink-linux-x86_64-v1.1.0.tar.gz
+   cd linlink-linux-x86_64
+   mkdir -p ~/.local/bin
+   cp linlink ~/.local/bin/
+   ```
+3. Ensure `~/.local/bin` is in your `PATH`.
 
 ---
 
-## 🐧 Rust Linux Companion Reference
+### 📱 Android Installation
 
-👉 **[`linux-companion/README.md`](linux-companion/README.md)** — full Rust module, function, and API documentation.
+1. Download the latest `linlink-android-arm64-v8a-v1.1.0.apk` from [GitHub Releases](https://github.com/THARUN-BART/linlink/releases) or [SourceForge](https://sourceforge.net/projects/linlink/files/).
+2. Open the `.apk` on your Android device to install.
+3. Grant necessary permissions (Camera for QR scanning, Storage for file saving).
 
 ---
 
-## 📋 Prerequisites
+### 🛠 Building from Source
 
-### Linux
+#### Prerequisites
 - **Rust** 1.80+: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Clipboard**: Wayland → `sudo apt install wl-clipboard` | X11 → `sudo apt install xclip xsel`
-
-### Android / Development
 - **Flutter SDK** 3.24+
-- **Android** 8.0+ on the same Wi-Fi / LAN
-- **Permissions**: Camera, Storage
+- **Clipboard utilities**:
+  - Wayland: `sudo apt install wl-clipboard`
+  - X11: `sudo apt install xclip xsel`
 
----
-
-## 🚀 Quickstart Guide
-
+#### Build Linux Companion
 ```bash
-# 1. Build & install the Linux companion
-cd linux-companion
+git clone https://github.com/THARUN-BART/linlink.git
+cd linlink/linux-companion
 cargo build --release
-cp target/release/linlink ~/.local/bin/   # no sudo needed
-
-# 2. (Optional) enable systemd auto-start
-systemctl --user enable linlink
-
-# 3. Start pairing
-linlink pair
+cp target/release/linlink ~/.local/bin/
 ```
 
+#### Build Android APK
 ```bash
-# 4. Run the Android app
-flutter run
+cd linlink
+flutter pub get
+flutter build apk --release --target-platform android-arm,android-arm64,android-x64 --split-per-abi
 ```
 
-Open LinLink on Android → **Scan QR Code** → scan the terminal QR → done!
+---
+
+## ✨ Key Features & Capabilities
+
+1. **📲 Sender-First Phone-to-Phone Direct Transfer**:
+   - Pick files first on your phone → display QR code → receiver scans and downloads in batch.
+   - 100% offline over Wi-Fi / Personal Hotspot with zero mobile data consumption.
+
+2. **📋 Real-Time Bidirectional Clipboard Mirror**:
+   - Copy on Linux → paste on Android. Copy on Android → paste on Linux.
+   - Background service keeps synchronization alive with status notifications.
+
+3. **💻 Interactive Linux Terminal Shell (`linlink shell`)**:
+   - Terminal REPL connected directly to Android storage: `ls`, `cd`, `pwd`, `cat`, `get`, `put`, `mkdir`, `rm`, `clip`.
+
+4. **🛡️ Strict Privacy Shield**:
+   - Remote storage browsing is restricted by default during P2P transfers.
+
+5. **⚙️ systemd User Service Integration**:
+   - Enable auto-start daemon with `systemctl --user enable linlink`.
+
+6. **🔌 Instant Disconnect Notification**:
+   - `linlink stop` instantly notifies the Android app via `/fs/disconnect` to reset state immediately.
 
 ---
 
-## 🛠 CLI Reference Manual
+## 🛠 CLI & Shell Reference Manual
+
+### Linux Host Commands
 
 | Command | Description |
 | :--- | :--- |
-| `linlink pair` | Start pairing server and display QR code |
-| `linlink pair --foreground` | Keep running in foreground (debugging) |
-| `linlink pair --host <IP>` | Specify a custom LAN IP for the QR code |
-| `linlink status` | Show active connection, device name, IP, port |
-| `linlink shell` | Open interactive terminal shell with Android |
-| `linlink clipboard [TEXT]` | View or set shared clipboard |
-| `linlink files` | List files in the LinLink transfers folder |
-| `linlink devices` | List active and past paired devices |
-| `linlink devices --remove <ID>` | Remove a device from history |
-| `linlink logs -f` | Follow daemon logs live |
-| `linlink stop` | Stop daemon and instantly notify Android |
+| `linlink pair` | Start pairing server and display QR code in terminal |
+| `linlink pair --foreground` | Run pairing server in foreground for debugging |
+| `linlink pair --host <IP>` | Specify custom LAN IP for the QR payload |
+| `linlink status` | Show active connection, peer device name, IP, and port |
+| `linlink shell` | Open interactive terminal shell with Android device |
+| `linlink clipboard [TEXT]` | View or set shared system clipboard |
+| `linlink files` | List files in the LinLink transfers directory |
+| `linlink devices` | List active and previously paired devices |
+| `linlink devices --remove <ID>` | Remove a device from paired history |
+| `linlink logs -f` | Follow live daemon logs |
+| `linlink stop` | Stop daemon and immediately notify Android to disconnect |
 
----
-
-## 💻 Interactive Shell Commands
-
-Inside `linlink shell`:
+### Interactive Shell Commands (`linlink shell`)
 
 | Command | Description |
 | :--- | :--- |
-| `ls [path]` | List files and directories on Android |
-| `cd [dir]` | Change working directory on Android |
-| `pwd` | Print current remote path |
-| `cat <file>` | Print text file contents in terminal |
-| `get <remote> [local]` | Download file from Android to `~/Downloads/LinLink/` |
-| `put <local> [name]` | Upload file from Linux to Android |
-| `mkdir <folder>` | Create directory on Android |
-| `rm <path>` | Delete file or directory on Android |
-| `clip [text]` | View or set shared clipboard |
-| `exit` | Exit the shell |
+| `ls [path]` | List files and folders on remote device |
+| `cd [dir]` | Change remote working directory |
+| `pwd` | Print current remote directory path |
+| `cat <file>` | Print remote text file contents in terminal |
+| `get <remote> [local]` | Download remote file to `~/Downloads/LinLink/` |
+| `put <local> [name]` | Upload file from Linux to Android storage |
+| `mkdir <folder>` | Create remote folder |
+| `rm <path>` | Delete file or directory on remote storage |
+| `clip [text]` | Read or update shared clipboard |
+| `clear` / `cls` | Clear terminal screen |
+| `exit` | Exit interactive shell |
 
 ---
 
@@ -247,35 +258,37 @@ Inside `linlink shell`:
 ```
 linlink/
 ├── assets/
-│   └── icon.png                          # App icon (AppBar, onboarding, pairing success)
+│   └── icon.png                          # App branding & UI icon
 ├── lib/
 │   ├── features/
 │   │   ├── clipboard/
-│   │   │   └── clipboard_service.dart    # Live clipboard sync engine
+│   │   │   ├── clipboard_service.dart    # Live clipboard sync engine
+│   │   │   └── clipboard_view.dart       # Clipboard management UI
 │   │   ├── home/
-│   │   │   └── home_screen.dart          # Dashboard + floating glass nav bar
+│   │   │   └── home_screen.dart          # M3 Dashboard + Glass Nav Bar
 │   │   ├── pairing/
-│   │   │   ├── pairing_service.dart      # Handshake & connection logic
+│   │   │   ├── pairing_service.dart      # TCP handshake & target parser
 │   │   │   ├── pairing_success_screen.dart
-│   │   │   └── views/phone_receive_dialog.dart
-│   │   ├── scanner/views/scanner_screen.dart
+│   │   │   └── views/phone_send_dialog.dart # Sender-first QR transfer dialog
+│   │   ├── scanner/
+│   │   │   └── views/scanner_screen.dart # QR scanner + P2P auto-downloader
 │   │   ├── settings/settings_screen.dart
 │   │   └── storage/
-│   │       ├── file_agent.dart           # TCP file server + /fs/disconnect handler
+│   │       ├── file_agent.dart           # Local TCP HTTP server & P2P queues
 │   │       ├── remote_file_browser_screen.dart
 │   │       └── storage_service.dart
-│   ├── theme/linlink_theme.dart          # Dark theme & color palette
+│   ├── theme/linlink_theme.dart          # Dark slate theme & tokens
 │   └── main.dart
-├── linux-companion/                      # Rust CLI & background daemon
-│   ├── README.md
+├── linux-companion/                      # Rust CLI & daemon engine
 │   ├── Cargo.toml
+│   ├── README.md
 │   └── src/
-│       ├── cli/                          # args, runner, shell REPL, UI helpers
-│       ├── daemon/                       # process.rs, server.rs (Axum + disconnect push)
-│       ├── device/                       # model.rs, manager.rs
-│       ├── pairing/                      # network, QR, pairing server, session
+│       ├── cli/                          # Shell REPL, args runner, UI formatting
+│       ├── daemon/                       # Axum server, process manager
+│       ├── device/                       # Device registry & models
+│       ├── pairing/                      # QR generator, network IP detector
 │       └── storage.rs
-├── pubspec.yaml                          # Flutter deps + assets/ registration
+├── pubspec.yaml
 └── README.md
 ```
 
@@ -283,13 +296,57 @@ linlink/
 
 ## 🔒 Security & Privacy
 
-- **Local Network Only** — no telemetry, no cloud, no third-party relays.
-- **Tokenized Sessions** — UUID v4 token required on every API call.
-- **Privacy Mode** — Linux cannot browse phone directories unless explicitly enabled.
-- **Instant Unlink** — `linlink stop` notifies Android via `/fs/disconnect` before exit; both sides clear state within 2 seconds.
+- **100% Local-First Architecture** — No external servers, no cloud storage, and no tracking telemetry.
+- **Dynamic Session Tokens** — Every transaction is authenticated with an ephemeral session token.
+- **Privacy Shield by Default** — Remote filesystem listing is blocked during phone-to-phone transfers; only explicitly selected files can be downloaded.
+- **Instant Unlink Handshake** — When shutting down, `linlink stop` dispatches an instant `/fs/disconnect` signal to clear state on all connected peers.
+
+---
+
+## 🤝 Contribution Guide
+
+We welcome contributions from the community! Follow these steps to contribute to LinLink:
+
+### 1. Fork & Clone the Repository
+```bash
+git clone https://github.com/THARUN-BART/linlink.git
+cd linlink
+```
+
+### 2. Create a Feature Branch
+```bash
+git checkout -b feature/your-feature-name
+```
+
+### 3. Development Guidelines
+- **Flutter**: Ensure code complies with analysis rules and tests pass:
+  ```bash
+  flutter pub get
+  flutter analyze
+  flutter test
+  ```
+- **Rust (Linux Companion)**: Format code, run clippy lints, and test:
+  ```bash
+  cd linux-companion
+  cargo fmt --all -- --check
+  cargo clippy --all-targets -- -D warnings
+  cargo test
+  ```
+
+### 4. Commit Your Changes
+Use concise conventional commit messages:
+```bash
+git commit -m "feat(module): add amazing feature description"
+```
+
+### 5. Push & Open a Pull Request
+```bash
+git push origin feature/your-feature-name
+```
+Open a Pull Request on GitHub with a clear summary of your changes.
 
 ---
 
 ## 📄 License
 
-MIT License.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
