@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -437,6 +438,13 @@ class _ScannerView extends StatelessWidget {
       return;
     }
 
+    // Detect P2P file transfer QR (mode=p2p)
+    final isP2P = payload.contains('mode=p2p');
+    if (isP2P) {
+      _startP2PReceive(context, target);
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -449,6 +457,43 @@ class _ScannerView extends StatelessWidget {
         onCancel: () {
           Navigator.of(dialogCtx).pop();
           cameraBloc.add(const CameraResetScanRequested());
+        },
+      ),
+    );
+  }
+
+  /// P2P receive flow: connect to sender, list queued files, and download them all.
+  void _startP2PReceive(BuildContext context, PairingTarget target) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => _P2PReceiveDialog(
+        target: target,
+        onComplete: (int count) {
+          Navigator.of(dialogCtx).pop();
+          Navigator.of(context).pop(); // Return to home
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: LinLinkColors.secondaryContainer,
+              duration: const Duration(seconds: 4),
+              content: Row(
+                children: [
+                  const Icon(Icons.download_done, color: LinLinkColors.secondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '📥 Received $count file${count > 1 ? 's' : ''}\nSaved in Downloads/LinLink',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+        onCancel: () {
+          Navigator.of(dialogCtx).pop();
+          context.read<CameraBloc>().add(const CameraResetScanRequested());
         },
       ),
     );
@@ -845,6 +890,199 @@ class _PairingConfirmDialogState extends State<_PairingConfirmDialog> {
             icon: const Icon(Icons.link, size: 18),
             label: const Text('Link Now'),
             onPressed: _startPairing,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Dialog that handles P2P file receiving — connects to sender's queued files
+/// and downloads them one-by-one to Downloads/LinLink.
+class _P2PReceiveDialog extends StatefulWidget {
+  final PairingTarget target;
+  final void Function(int count) onComplete;
+  final VoidCallback onCancel;
+
+  const _P2PReceiveDialog({
+    required this.target,
+    required this.onComplete,
+    required this.onCancel,
+  });
+
+  @override
+  State<_P2PReceiveDialog> createState() => _P2PReceiveDialogState();
+}
+
+class _P2PReceiveDialogState extends State<_P2PReceiveDialog> {
+  String _statusMessage = 'Connecting to sender...';
+  String? _errorMessage;
+  int _totalFiles = 0;
+  int _downloadedFiles = 0;
+  String _currentFileName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _startReceiving();
+  }
+
+  Future<void> _startReceiving() async {
+    setState(() {
+      _errorMessage = null;
+      _statusMessage = 'Connecting to sender...';
+    });
+
+    final baseUrl = 'http://${widget.target.host}:${widget.target.port}';
+    final token = widget.target.token;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+
+    try {
+      // 1. Fetch file list from sender
+      final listUri = Uri.parse('$baseUrl/p2p/files?t=$token');
+      final listReq = await client.getUrl(listUri);
+      final listRes = await listReq.close();
+      final listBody = await listRes.transform(utf8.decoder).join();
+      final listData = jsonDecode(listBody) as Map<String, dynamic>;
+
+      if (listData['status'] != 'ok') {
+        throw Exception(listData['message'] ?? 'Failed to get file list');
+      }
+
+      final files = (listData['files'] as List<dynamic>?) ?? [];
+      if (files.isEmpty) {
+        throw Exception('No files queued on sender');
+      }
+
+      setState(() {
+        _totalFiles = files.length;
+        _statusMessage = 'Downloading ${files.length} file${files.length > 1 ? 's' : ''}...';
+      });
+
+      // 2. Ensure target directory exists
+      final destDir = Directory('/storage/emulated/0/Download/LinLink');
+      if (!await destDir.exists()) {
+        await destDir.create(recursive: true);
+      }
+
+      // 3. Download each file
+      for (int i = 0; i < files.length; i++) {
+        final fileInfo = files[i] as Map<String, dynamic>;
+        final fileName = fileInfo['name'] as String? ?? 'file_$i';
+        final fileIndex = fileInfo['index'] as int? ?? i;
+
+        setState(() {
+          _downloadedFiles = i;
+          _currentFileName = fileName;
+          _statusMessage = 'Downloading ${i + 1}/${files.length}: $fileName';
+        });
+
+        final downloadUri = Uri.parse('$baseUrl/p2p/download?t=$token&index=$fileIndex');
+        final dlReq = await client.getUrl(downloadUri);
+        final dlRes = await dlReq.close();
+
+        if (dlRes.statusCode != 200) {
+          debugPrint('Failed to download $fileName: HTTP ${dlRes.statusCode}');
+          continue;
+        }
+
+        final destFile = File('${destDir.path}/$fileName');
+        final sink = destFile.openWrite();
+        await dlRes.cast<List<int>>().pipe(sink);
+
+        debugPrint('✅ Downloaded: $fileName → ${destFile.path}');
+      }
+
+      setState(() {
+        _downloadedFiles = files.length;
+        _statusMessage = 'All files received!';
+      });
+
+      // Small delay for user to see completion
+      await Future.delayed(const Duration(milliseconds: 500));
+      widget.onComplete(files.length);
+    } catch (e) {
+      debugPrint('P2P receive error: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+          _statusMessage = 'Transfer failed';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: LinLinkColors.surfaceContainer,
+      title: Row(
+        children: [
+          Icon(
+            _errorMessage != null ? Icons.error_outline : Icons.download_rounded,
+            color: _errorMessage != null ? LinLinkColors.error : LinLinkColors.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _errorMessage != null ? 'Transfer Failed' : 'Receiving Files',
+            style: const TextStyle(fontSize: 16),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_errorMessage != null) ...[
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: LinLinkColors.error, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            if (_totalFiles > 0) ...[
+              LinearProgressIndicator(
+                value: _totalFiles > 0 ? _downloadedFiles / _totalFiles : null,
+                backgroundColor: LinLinkColors.surfaceContainerLowest,
+                color: LinLinkColors.primary,
+              ),
+              const SizedBox(height: 10),
+            ] else ...[
+              const LinearProgressIndicator(
+                backgroundColor: LinLinkColors.surfaceContainerLowest,
+                color: LinLinkColors.primary,
+              ),
+              const SizedBox(height: 10),
+            ],
+            Text(
+              _statusMessage,
+              style: const TextStyle(color: LinLinkColors.onSurfaceVariant, fontSize: 13),
+            ),
+            if (_currentFileName.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                _currentFileName,
+                style: const TextStyle(
+                  color: LinLinkColors.onSurface,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ],
+      ),
+      actions: [
+        if (_errorMessage != null) ...[
+          TextButton(
+            onPressed: widget.onCancel,
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retry'),
+            onPressed: _startReceiving,
           ),
         ],
       ],

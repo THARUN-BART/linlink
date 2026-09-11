@@ -32,6 +32,13 @@ class AndroidFileAgent {
   /// The UI should use this to immediately clear the paired state.
   static void Function()? onLinuxDisconnected;
 
+  /// Files queued for P2P sending — the sender picks files first, then the receiver
+  /// scans a QR and auto-downloads them via /p2p/files and /p2p/download.
+  static List<File> pendingP2PFiles = [];
+
+  /// Called after the receiver has downloaded ALL pending P2P files.
+  static void Function()? onAllFilesServed;
+
   /// Discovers local IPv4 addresses (e.g. Wi-Fi or Hotspot LAN IP).
   static Future<List<String>> getLocalIpv4Addresses() async {
     final ips = <String>[];
@@ -294,6 +301,14 @@ class AndroidFileAgent {
 
         case '/fs/clipboard':
           await _handleClipboard(request, expectedToken ?? '');
+          break;
+
+        case '/p2p/files':
+          await _handleP2PFileList(request);
+          break;
+
+        case '/p2p/download':
+          await _handleP2PDownload(request);
           break;
 
         default:
@@ -678,5 +693,72 @@ class AndroidFileAgent {
         'message': e.toString(),
       }, status: HttpStatus.internalServerError);
     }
+  }
+
+  /// Lists the files queued by the sender for P2P download.
+  static Future<void> _handleP2PFileList(HttpRequest request) async {
+    final files = <Map<String, dynamic>>[];
+    for (int i = 0; i < pendingP2PFiles.length; i++) {
+      final f = pendingP2PFiles[i];
+      try {
+        final stat = await f.stat();
+        files.add({
+          'index': i,
+          'name': f.uri.pathSegments.last,
+          'size': stat.size,
+        });
+      } catch (_) {
+        files.add({
+          'index': i,
+          'name': f.uri.pathSegments.last,
+          'size': 0,
+        });
+      }
+    }
+    await _writeJson(request.response, {
+      'status': 'ok',
+      'count': pendingP2PFiles.length,
+      'files': files,
+    });
+  }
+
+  /// Serves a specific queued file by index for the receiver to download.
+  static Future<void> _handleP2PDownload(HttpRequest request) async {
+    final indexStr = request.uri.queryParameters['index'];
+    if (indexStr == null) {
+      request.response
+        ..statusCode = HttpStatus.badRequest
+        ..write('Missing index');
+      await request.response.close();
+      return;
+    }
+    final index = int.tryParse(indexStr);
+    if (index == null || index < 0 || index >= pendingP2PFiles.length) {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('Invalid file index');
+      await request.response.close();
+      return;
+    }
+
+    final file = pendingP2PFiles[index];
+    if (!await file.exists()) {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('File no longer available');
+      await request.response.close();
+      return;
+    }
+
+    final filename = file.uri.pathSegments.last;
+    final length = await file.length();
+
+    request.response
+      ..statusCode = HttpStatus.ok
+      ..headers.contentType = ContentType.binary
+      ..headers.set(HttpHeaders.contentDisposition, 'attachment; filename="$filename"')
+      ..contentLength = length;
+
+    await file.openRead().cast<List<int>>().pipe(request.response);
   }
 }

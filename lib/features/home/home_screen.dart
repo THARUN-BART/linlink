@@ -7,7 +7,7 @@ import '../clipboard/clipboard_service.dart';
 import '../clipboard/clipboard_view.dart';
 import '../pairing/pairing_service.dart';
 import '../pairing/pairing_success_screen.dart';
-import '../pairing/views/phone_receive_dialog.dart';
+import '../pairing/views/phone_send_dialog.dart';
 import '../scanner/views/scanner_screen.dart';
 import '../settings/settings_screen.dart';
 import '../storage/file_agent.dart';
@@ -142,20 +142,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     }
   }
 
-  Future<void> _openPhoneReceiveDialog() async {
-    final peer = await PhoneReceiveDialog.show(context);
-    if (peer != null && mounted) {
-      setState(() {
-        _pairedCompanion = peer;
-      });
-      await AndroidFileAgent.startServer(companion: peer);
-      if (!mounted) return;
-      ClipboardService.startAutoSync(peer);
-
+  Future<void> _openPhoneSendDialog() async {
+    final success = await PhoneSendDialog.pickAndShow(context);
+    if (success == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           backgroundColor: LinLinkColors.secondaryContainer,
-          content: Text('🎉 Linked to ${peer.deviceName}! Ready to transfer files.'),
+          content: Text('✅ Files sent successfully!'),
         ),
       );
     }
@@ -748,7 +741,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                   child: Container(
-                    height: 64,
+                    height: 68,
                     decoration: BoxDecoration(
                       color: LinLinkColors.surface.withAlpha(180),
                       borderRadius: BorderRadius.circular(32),
@@ -798,8 +791,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           decoration: BoxDecoration(
             color: isActive
                 ? LinLinkColors.primary.withAlpha(30)
@@ -1055,17 +1048,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                           backgroundColor: LinLinkColors.secondaryContainer,
                           foregroundColor: LinLinkColors.onSecondaryContainer,
                         ),
-                        onPressed: _openPhoneReceiveDialog,
-                        icon: const Icon(Icons.qr_code, size: 18),
-                        label: const Text('Receive Files'),
+                        onPressed: _openPhoneSendDialog,
+                        icon: const Icon(Icons.send_rounded, size: 18),
+                        label: const Text('Send Files'),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: _openScanner,
-                        icon: const Icon(Icons.send_rounded, size: 16),
-                        label: const Text('Send to Phone'),
+                        icon: const Icon(Icons.qr_code_scanner, size: 16),
+                        label: const Text('Receive Files'),
                       ),
                     ),
                   ],
