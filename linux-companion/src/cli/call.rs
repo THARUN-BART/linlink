@@ -40,7 +40,10 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
     println!("  ┌────────────────────────────────────────────────────────┐");
     println!("  │  📞 LinLink Remote Voice Calling & Audio Bridge 📱     │");
     println!("  └────────────────────────────────────────────────────────┘");
-    println!("    Linked Phone:  {} (http://{}:{})", device_name, client_ip, agent_port);
+    println!(
+        "    Linked Phone:  {} (http://{}:{})",
+        device_name, client_ip, agent_port
+    );
     println!("    PC Audio Mode: Full-Duplex (PC Mic -> Phone, Phone -> PC Speaker)");
 
     let dial_target = if let Some(n) = number {
@@ -70,7 +73,10 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
             .await
         {
             Ok(res) if res.status() == 200 => {
-                println!("    ✅ Phone is placing cellular call to {}...", dial_target);
+                println!(
+                    "    ✅ Phone is placing cellular call to {}...",
+                    dial_target
+                );
             }
             _ => {
                 println!("    ℹ️ Initiating remote call to {}...", dial_target);
@@ -96,7 +102,10 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
                 println!("  🔔 Call ringing on {}...", device_name);
             }
             _ => {
-                println!("  ℹ️ Connecting audio bridge to {} directly...", device_name);
+                println!(
+                    "  ℹ️ Connecting audio bridge to {} directly...",
+                    device_name
+                );
             }
         }
     }
@@ -147,7 +156,11 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
                         let now = !prev;
                         println!(
                             "\n    🎤 PC Microphone {}",
-                            if now { "\x1b[1;31m[MUTED]\x1b[0m" } else { "\x1b[1;32m[ACTIVE]\x1b[0m" }
+                            if now {
+                                "\x1b[1;31m[MUTED]\x1b[0m"
+                            } else {
+                                "\x1b[1;32m[ACTIVE]\x1b[0m"
+                            }
                         );
                     }
                     b's' | b'S' => {
@@ -155,7 +168,11 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
                         let now = !prev;
                         println!(
                             "\n    🔊 PC Speaker Output {}",
-                            if now { "\x1b[1;31m[MUTED]\x1b[0m" } else { "\x1b[1;32m[ACTIVE]\x1b[0m" }
+                            if now {
+                                "\x1b[1;31m[MUTED]\x1b[0m"
+                            } else {
+                                "\x1b[1;32m[ACTIVE]\x1b[0m"
+                            }
                         );
                     }
                     b'q' | b'Q' | b'h' | b'H' => {
@@ -181,8 +198,16 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
         let spk_is_muted = SPEAKER_MUTED.load(Ordering::SeqCst);
 
         // Generate dynamic VU meter levels
-        let mic_level = if mic_is_muted { 0 } else { 4 + ((tick * 3) % 11) };
-        let spk_level = if spk_is_muted { 0 } else { 3 + ((tick * 5) % 12) };
+        let mic_level = if mic_is_muted {
+            0
+        } else {
+            4 + ((tick * 3) % 11)
+        };
+        let spk_level = if spk_is_muted {
+            0
+        } else {
+            3 + ((tick * 5) % 12)
+        };
 
         let mic_bar = format_vu_bar(mic_level as usize, 16);
         let spk_bar = format_vu_bar(spk_level as usize, 16);
@@ -191,9 +216,17 @@ pub async fn run_call(number: Option<String>, _device_filter: Option<String>) {
             "\r  \x1b[1;32m● IN CALL\x1b[0m [{:02}:{:02}] │ Mic: {} [{}] │ Spk: {} [{}]   ",
             mins,
             secs,
-            if mic_is_muted { "\x1b[31mMUTED\x1b[0m" } else { "\x1b[32mON\x1b[0m" },
+            if mic_is_muted {
+                "\x1b[31mMUTED\x1b[0m"
+            } else {
+                "\x1b[32mON\x1b[0m"
+            },
             mic_bar,
-            if spk_is_muted { "\x1b[31mMUTED\x1b[0m" } else { "\x1b[32mON\x1b[0m" },
+            if spk_is_muted {
+                "\x1b[31mMUTED\x1b[0m"
+            } else {
+                "\x1b[32mON\x1b[0m"
+            },
             spk_bar
         );
         let _ = io::stdout().flush();
@@ -270,9 +303,17 @@ pub async fn handle_shell_call(
     })
     .to_string();
 
-    match client.post(&invite_url).body(payload.into_bytes()).send().await {
+    match client
+        .post(&invite_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
         Ok(res) if res.status() == 200 => {
-            println!("    🔔 Call ringing on {}! Type 'linlink call' for full interactive call screen.", device_name);
+            println!(
+                "    🔔 Call ringing on {}! Type 'linlink call' for full interactive call screen.",
+                device_name
+            );
         }
         Ok(_) => {
             println!("    ✅ Call bridge connected with {}.", device_name);
@@ -289,7 +330,10 @@ pub async fn handle_shell_dial(
     token: &str,
     phone_number: &str,
 ) {
-    println!("    📞 Dialing {} on your phone via PC audio bridge...", phone_number);
+    println!(
+        "    📞 Dialing {} on your phone via PC audio bridge...",
+        phone_number
+    );
     let dial_url = format!("{}/call/dial?token={}", base_url, token);
     let payload = serde_json::json!({
         "token": token,
@@ -298,7 +342,12 @@ pub async fn handle_shell_dial(
     })
     .to_string();
 
-    match client.post(&dial_url).body(payload.into_bytes()).send().await {
+    match client
+        .post(&dial_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
         Ok(res) if res.status() == 200 => {
             println!("    ✅ Calling {} on Android phone! Type 'linlink call {}' for full interactive call screen.", phone_number, phone_number);
         }
@@ -311,11 +360,7 @@ pub async fn handle_shell_dial(
     }
 }
 
-pub async fn handle_shell_hangup(
-    client: &reqwest_compat::Client,
-    base_url: &str,
-    token: &str,
-) {
+pub async fn handle_shell_hangup(client: &reqwest_compat::Client, base_url: &str, token: &str) {
     println!("    📞 Ending active remote call...");
     let hangup_url = format!("{}/call/hangup?token={}", base_url, token);
     let payload = serde_json::json!({
@@ -325,7 +370,12 @@ pub async fn handle_shell_hangup(
     })
     .to_string();
 
-    match client.post(&hangup_url).body(payload.into_bytes()).send().await {
+    match client
+        .post(&hangup_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
         Ok(_) => println!("    ✅ Call ended successfully."),
         Err(e) => println!("    ❌ Error ending call: {}", e),
     }
@@ -349,9 +399,23 @@ pub async fn handle_shell_call_status(
                 println!("\n    📞 Remote Calling Status:");
                 println!("       • Target:           {}", caller);
                 println!("       • State:            {}", state.to_uppercase());
-                println!("       • Duration:         {:02}:{:02}", duration / 60, duration % 60);
-                println!("       • PC Microphone:    {}", if mic_muted { "Muted" } else { "Active (Speaking)" });
-                println!("       • PC Speaker:       {}", if spk { "Active (Hearing)" } else { "Muted" });
+                println!(
+                    "       • Duration:         {:02}:{:02}",
+                    duration / 60,
+                    duration % 60
+                );
+                println!(
+                    "       • PC Microphone:    {}",
+                    if mic_muted {
+                        "Muted"
+                    } else {
+                        "Active (Speaking)"
+                    }
+                );
+                println!(
+                    "       • PC Speaker:       {}",
+                    if spk { "Active (Hearing)" } else { "Muted" }
+                );
                 println!("       • Audio Bridge:     Connected\n");
                 return;
             }

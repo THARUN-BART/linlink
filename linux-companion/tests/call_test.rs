@@ -1,6 +1,6 @@
+use linux_companion::daemon::server::{CallStateInfo, DaemonServerState};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use linux_companion::daemon::server::{CallStateInfo, DaemonServerState};
 
 #[tokio::test]
 async fn test_daemon_call_state() {
@@ -27,8 +27,8 @@ async fn test_daemon_call_state() {
     {
         let c = state.call_state.lock().await;
         assert_eq!(c.state, "idle");
-        assert_eq!(c.mic_muted, false);
-        assert_eq!(c.speaker_enabled, true);
+        assert!(!c.mic_muted);
+        assert!(c.speaker_enabled);
     }
 
     // Simulate active call state

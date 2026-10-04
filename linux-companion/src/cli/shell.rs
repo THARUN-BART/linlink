@@ -226,7 +226,8 @@ pub async fn run_shell(_device_filter: Option<String>) {
                     let number = args.join("");
                     crate::cli::call::handle_shell_dial(&client, &base_url, &token, &number).await;
                 } else {
-                    crate::cli::call::handle_shell_call(&client, &base_url, &token, &device_name).await;
+                    crate::cli::call::handle_shell_call(&client, &base_url, &token, &device_name)
+                        .await;
                 }
             }
 

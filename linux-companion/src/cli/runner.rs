@@ -149,7 +149,9 @@ pub fn run() {
                 .enable_all()
                 .build()
                 .expect("failed to build tokio runtime")
-                .block_on(crate::cli::update::run_update(check, force, apk, yes, &repo));
+                .block_on(crate::cli::update::run_update(
+                    check, force, apk, yes, &repo,
+                ));
         }
 
         Commands::Daemon {

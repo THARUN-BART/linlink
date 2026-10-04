@@ -1,8 +1,8 @@
+use crate::storage::Storage;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
-use crate::storage::Storage;
 
 const DEFAULT_REPO: &str = "THARUN-BART/linlink";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -63,7 +63,10 @@ pub async fn run_update(
     let is_newer = is_version_newer(CURRENT_VERSION, &release.version);
 
     println!("  ┌────────────────────────────────────────────────────────┐");
-    println!("  │  Online Release: \x1b[1;32m{:<37}\x1b[0m │", release.tag_name);
+    println!(
+        "  │  Online Release: \x1b[1;32m{:<37}\x1b[0m │",
+        release.tag_name
+    );
     if !release.published_at.is_empty() {
         println!("  │  Published At:   {:<37} │", release.published_at);
     }
@@ -117,7 +120,10 @@ pub async fn run_update(
             CURRENT_VERSION, release.tag_name
         );
     } else {
-        println!("  ⚠️  Force update requested for current version v{}.", CURRENT_VERSION);
+        println!(
+            "  ⚠️  Force update requested for current version v{}.",
+            CURRENT_VERSION
+        );
     }
 
     if !non_interactive {
@@ -148,12 +154,13 @@ async fn handle_apk_download(release: &ReleaseInfo, non_interactive: bool) {
     let _ = fs::create_dir_all(&target_dir);
 
     let default_name = format!("linlink-{}.apk", release.tag_name.trim_start_matches('v'));
-    let download_name = apk_asset
-        .map(|a| a.name.clone())
-        .unwrap_or(default_name);
+    let download_name = apk_asset.map(|a| a.name.clone()).unwrap_or(default_name);
     let output_path = target_dir.join(&download_name);
 
-    println!("  📱 Downloading Android APK: \x1b[1m{}\x1b[0m", download_name);
+    println!(
+        "  📱 Downloading Android APK: \x1b[1m{}\x1b[0m",
+        download_name
+    );
     println!("     Destination: {}", output_path.display());
 
     let download_url = if let Some(asset) = apk_asset {
@@ -168,7 +175,10 @@ async fn handle_apk_download(release: &ReleaseInfo, non_interactive: bool) {
 
     if !download_file_with_progress(&download_url, &output_path).await {
         println!("  ❌ Failed to download Android APK from {}", download_url);
-        println!("     You can download it manually from: {}\n", release.html_url);
+        println!(
+            "     You can download it manually from: {}\n",
+            release.html_url
+        );
         return;
     }
 
@@ -181,7 +191,10 @@ async fn handle_apk_download(release: &ReleaseInfo, non_interactive: bool) {
             let send_prompt = if non_interactive {
                 false
             } else {
-                print!("  📱 Send this update APK directly to connected phone '{}'? [Y/n] ", dev.name);
+                print!(
+                    "  📱 Send this update APK directly to connected phone '{}'? [Y/n] ",
+                    dev.name
+                );
                 let _ = io::stdout().flush();
                 let mut input = String::new();
                 if io::stdin().read_line(&mut input).is_ok() {
@@ -203,26 +216,37 @@ async fn send_apk_to_phone(apk_path: &Path, dev: &crate::device::CurrentDevice) 
     let client_ip = dev.client_ip.clone().unwrap_or_else(|| "127.0.0.1".into());
     let agent_port = dev.agent_port.unwrap_or(7879);
     let token = dev.token.clone();
-    let filename = apk_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let filename = apk_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
 
-    println!("  ⬆️  Sending APK to Android device ({}:{})...", client_ip, agent_port);
+    println!(
+        "  ⬆️  Sending APK to Android device ({}:{})...",
+        client_ip, agent_port
+    );
 
     if let Ok(bytes) = fs::read(apk_path) {
         let base_url = format!("http://{}:{}", client_ip, agent_port);
         let url = format!(
             "{}/fs/upload?token={}&path=/storage/emulated/0/Download&filename={}",
-            base_url,
-            token,
-            filename
+            base_url, token, filename
         );
         let client = crate::cli::shell::reqwest_compat::Client::new();
         match client.post(&url).body(bytes).send().await {
             Ok(res) if res.status() == 200 => {
-                println!("  ✅ APK sent to phone's Download folder: /storage/emulated/0/Download/{}", filename);
+                println!(
+                    "  ✅ APK sent to phone's Download folder: /storage/emulated/0/Download/{}",
+                    filename
+                );
                 println!("     You can open and install it directly from your phone's notification or file manager.\n");
             }
             _ => {
-                println!("  ⚠️  Could not auto-transfer APK to phone. Please copy {} manually.\n", apk_path.display());
+                println!(
+                    "  ⚠️  Could not auto-transfer APK to phone. Please copy {} manually.\n",
+                    apk_path.display()
+                );
             }
         }
     }
@@ -263,13 +287,18 @@ async fn perform_linux_binary_update(release: &ReleaseInfo) {
     println!("  ⬇️  Downloading updated binary from GitHub...");
     if !download_file_with_progress(&download_url, &temp_bin_path).await {
         // Fallback: If direct binary asset is not attached (e.g. tag-based source), offer git / cargo build
-        println!("  ⚠️  Direct binary download failed. Checking for local git repository source...");
+        println!(
+            "  ⚠️  Direct binary download failed. Checking for local git repository source..."
+        );
         if try_git_source_update() {
             return;
         }
 
         println!("  ❌ Could not download binary from {}", download_url);
-        println!("     Please download the latest release manually from: {}\n", release.html_url);
+        println!(
+            "     Please download the latest release manually from: {}\n",
+            release.html_url
+        );
         return;
     }
 
@@ -332,7 +361,10 @@ async fn perform_linux_binary_update(release: &ReleaseInfo) {
     let _ = fs::remove_file(&old_backup);
     let _ = fs::remove_file(&temp_bin_path);
 
-    println!("\n  🎉 \x1b[1;32mLinLink has been successfully updated to {}!\x1b[0m", release.tag_name);
+    println!(
+        "\n  🎉 \x1b[1;32mLinLink has been successfully updated to {}!\x1b[0m",
+        release.tag_name
+    );
     println!("     Run `linlink --version` or `linlink status` to test the new version.\n");
 }
 
@@ -344,13 +376,22 @@ fn try_git_source_update() -> bool {
 
     if let Ok(out) = git_check {
         if out.status.success() {
-            println!("  📦 Detected Git repository workspace. Updating via git pull & cargo build...");
-            let pull_status = Command::new("git").args(["pull", "origin", "main"]).status();
+            println!(
+                "  📦 Detected Git repository workspace. Updating via git pull & cargo build..."
+            );
+            let pull_status = Command::new("git")
+                .args(["pull", "origin", "main"])
+                .status();
             if let Ok(ps) = pull_status {
                 if ps.success() {
                     println!("  🔨 Recompiling LinLink companion...");
                     let build_status = Command::new("cargo")
-                        .args(["build", "--release", "--manifest-path", "linux-companion/Cargo.toml"])
+                        .args([
+                            "build",
+                            "--release",
+                            "--manifest-path",
+                            "linux-companion/Cargo.toml",
+                        ])
                         .status();
                     if let Ok(bs) = build_status {
                         if bs.success() {
@@ -390,8 +431,9 @@ async fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
     }
 
     let raw_str = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&raw_str)
-        .map_err(|_| "Failed to parse GitHub API response. No release found or rate limit exceeded.".to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&raw_str).map_err(|_| {
+        "Failed to parse GitHub API response. No release found or rate limit exceeded.".to_string()
+    })?;
 
     if let Some(msg) = json.get("message").and_then(|m| m.as_str()) {
         if msg.contains("Not Found") {
@@ -405,7 +447,10 @@ async fn fetch_latest_release(repo: &str) -> Result<ReleaseInfo, String> {
     let version = tag_name.trim_start_matches('v').to_string();
     let name = json["name"].as_str().unwrap_or(&tag_name).to_string();
     let body = json["body"].as_str().unwrap_or("").to_string();
-    let html_url = json["html_url"].as_str().unwrap_or("https://github.com/THARUN-BART/linlink").to_string();
+    let html_url = json["html_url"]
+        .as_str()
+        .unwrap_or("https://github.com/THARUN-BART/linlink")
+        .to_string();
     let published_at = json["published_at"].as_str().unwrap_or("").to_string();
 
     let mut assets = Vec::new();
@@ -452,8 +497,8 @@ async fn fetch_latest_git_tag(repo: &str) -> Result<ReleaseInfo, String> {
         .map_err(|e| format!("Curl error: {}", e))?;
 
     let raw_str = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&raw_str)
-        .map_err(|_| "Failed to query tags".to_string())?;
+    let json: serde_json::Value =
+        serde_json::from_str(&raw_str).map_err(|_| "Failed to query tags".to_string())?;
 
     if let Some(arr) = json.as_array() {
         if let Some(first) = arr.first() {
@@ -485,7 +530,7 @@ async fn fetch_latest_git_tag(repo: &str) -> Result<ReleaseInfo, String> {
 
 /// Download a file with progress output using curl
 async fn download_file_with_progress(url: &str, output_path: &Path) -> bool {
-    print!("     Downloading from {} ...\n", url);
+    println!("     Downloading from {} ...", url);
     let status = Command::new("curl")
         .args([
             "-L",
@@ -497,7 +542,13 @@ async fn download_file_with_progress(url: &str, output_path: &Path) -> bool {
         .status();
 
     match status {
-        Ok(s) => s.success() && output_path.exists() && fs::metadata(output_path).map(|m| m.len() > 0).unwrap_or(false),
+        Ok(s) => {
+            s.success()
+                && output_path.exists()
+                && fs::metadata(output_path)
+                    .map(|m| m.len() > 0)
+                    .unwrap_or(false)
+        }
         Err(_) => false,
     }
 }
