@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import '../call/call_service.dart';
 import '../clipboard/clipboard_service.dart';
 import '../pairing/pairing_service.dart';
 
@@ -311,6 +312,36 @@ class AndroidFileAgent {
           await _handleP2PDownload(request);
           break;
 
+        case '/call/invite':
+        case '/api/call/invite':
+          await _handleCallInvite(request);
+          break;
+
+        case '/call/dial':
+        case '/api/call/dial':
+          await _handleCallDial(request);
+          break;
+
+        case '/call/answer':
+        case '/api/call/answer':
+          await _handleCallAnswer(request);
+          break;
+
+        case '/call/hangup':
+        case '/api/call/hangup':
+          await _handleCallHangup(request);
+          break;
+
+        case '/call/status':
+        case '/api/call/status':
+          await _handleCallStatus(request);
+          break;
+
+        case '/call/control':
+        case '/api/call/control':
+          await _handleCallControl(request);
+          break;
+
         default:
           request.response
             ..statusCode = HttpStatus.notFound
@@ -409,16 +440,43 @@ class AndroidFileAgent {
         final list = dir.listSync(followLinks: false);
         for (final entity in list) {
           try {
-            final stat = entity.statSync();
-            final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
-            if (name.startsWith('.')) continue;
+            String name = entity.path.split(Platform.pathSeparator).last;
+            if (name.isEmpty && entity.uri.pathSegments.isNotEmpty) {
+              name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+            }
+            if (name.isEmpty || name.startsWith('.')) continue;
 
-            final isDir = stat.type == FileSystemEntityType.directory;
+            bool isDir = entity is Directory;
+            int size = 0;
+            String modified = '-';
+
+            try {
+              final stat = entity.statSync();
+              isDir = stat.type == FileSystemEntityType.directory;
+              size = isDir ? 0 : stat.size;
+              modified = stat.modified.toIso8601String().substring(0, 19).replaceAll('T', ' ');
+            } catch (_) {
+              // If statSync fails on Android for individual files, determine type and size gracefully
+              isDir = entity is Directory;
+              if (!isDir && entity is File) {
+                try {
+                  size = entity.lengthSync();
+                } catch (_) {
+                  size = 0;
+                }
+                try {
+                  modified = entity.lastModifiedSync().toIso8601String().substring(0, 19).replaceAll('T', ' ');
+                } catch (_) {
+                  modified = '-';
+                }
+              }
+            }
+
             entries.add({
               'name': name,
               'is_dir': isDir,
-              'size': isDir ? 0 : stat.size,
-              'modified': stat.modified.toIso8601String().substring(0, 19).replaceAll('T', ' '),
+              'size': size,
+              'modified': modified,
             });
           } catch (_) {}
         }
@@ -760,5 +818,141 @@ class AndroidFileAgent {
       ..contentLength = length;
 
     await file.openRead().cast<List<int>>().pipe(request.response);
+  }
+
+  static Future<void> _handleCallInvite(HttpRequest request) async {
+    try {
+      final body = await utf8.decoder.bind(request).join();
+      Map<String, dynamic> data = {};
+      if (body.isNotEmpty) {
+        data = jsonDecode(body) as Map<String, dynamic>;
+      }
+      final caller = data['caller']?.toString() ?? 'Linux Companion';
+      var clientIp = request.connectionInfo?.remoteAddress.address ?? '';
+      if (clientIp.startsWith('::ffff:')) {
+        clientIp = clientIp.substring(7);
+      }
+
+      CallService.handleIncomingCall(
+        callerName: caller,
+        host: clientIp.isNotEmpty ? clientIp : null,
+      );
+
+      await _writeJson(request.response, {
+        'status': 'ok',
+        'call_state': 'ringing',
+        'message': 'Incoming call ringing on Android',
+      });
+    } catch (e) {
+      await _writeJson(request.response, {
+        'status': 'error',
+        'message': e.toString(),
+      }, status: HttpStatus.internalServerError);
+    }
+  }
+
+  static Future<void> _handleCallAnswer(HttpRequest request) async {
+    await CallService.answerCall();
+    await _writeJson(request.response, {
+      'status': 'ok',
+      'call_state': 'in_call',
+    });
+  }
+
+  static Future<void> _handleCallHangup(HttpRequest request) async {
+    CallService.handleRemoteHungUp();
+    await _writeJson(request.response, {
+      'status': 'ok',
+      'call_state': 'ended',
+    });
+  }
+
+  static Future<void> _handleCallStatus(HttpRequest request) async {
+    String stateStr;
+    switch (CallService.state) {
+      case CallState.calling:
+        stateStr = 'calling';
+        break;
+      case CallState.ringing:
+        stateStr = 'ringing';
+        break;
+      case CallState.inCall:
+        stateStr = 'in_call';
+        break;
+      case CallState.ended:
+        stateStr = 'ended';
+        break;
+      case CallState.idle:
+        stateStr = 'idle';
+        break;
+    }
+
+    await _writeJson(request.response, {
+      'status': 'ok',
+      'call_state': stateStr,
+      'duration': CallService.durationSeconds,
+      'mic_muted': CallService.isMuted,
+      'speaker_enabled': CallService.isSpeakerOn,
+      'caller': CallService.remoteDeviceName,
+      'pc_audio_bridge': 'active',
+    });
+  }
+
+  static Future<void> _handleCallControl(HttpRequest request) async {
+    try {
+      final body = await utf8.decoder.bind(request).join();
+      if (body.isNotEmpty) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        if (data.containsKey('is_muted')) {
+          CallService.isMuted = data['is_muted'] == true;
+          CallService.muteNotifier.value = CallService.isMuted;
+        }
+      }
+      await _writeJson(request.response, {'status': 'ok'});
+    } catch (e) {
+      await _writeJson(request.response, {'status': 'error', 'message': e.toString()});
+    }
+  }
+
+  static Future<void> _handleCallDial(HttpRequest request) async {
+    try {
+      final body = await utf8.decoder.bind(request).join();
+      Map<String, dynamic> data = {};
+      if (body.isNotEmpty) {
+        data = jsonDecode(body) as Map<String, dynamic>;
+      }
+      final phoneNumber = data['phone_number']?.toString() ??
+          data['number']?.toString() ??
+          request.uri.queryParameters['phone_number'] ??
+          request.uri.queryParameters['number'] ??
+          '';
+
+      if (phoneNumber.isEmpty) {
+        await _writeJson(request.response, {
+          'status': 'error',
+          'message': 'Missing phone number to dial',
+        }, status: HttpStatus.badRequest);
+        return;
+      }
+
+      var clientIp = request.connectionInfo?.remoteAddress.address ?? '';
+      if (clientIp.startsWith('::ffff:')) {
+        clientIp = clientIp.substring(7);
+      }
+
+      await CallService.dialNumber(phoneNumber);
+
+      await _writeJson(request.response, {
+        'status': 'ok',
+        'call_state': 'in_call',
+        'dialed_number': phoneNumber,
+        'message': 'Dialing $phoneNumber on Android phone with PC audio bridge active',
+      });
+    } catch (e) {
+      await _writeJson(request.response, {
+        'status': 'error',
+        'message': e.toString(),
+      }, status: HttpStatus.internalServerError);
+    }
   }
 }

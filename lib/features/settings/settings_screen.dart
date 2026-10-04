@@ -5,6 +5,7 @@ import '../clipboard/clipboard_service.dart';
 import '../pairing/pairing_service.dart';
 import '../storage/file_agent.dart';
 import '../storage/storage_service.dart';
+import '../update/update_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final PairedCompanion? pairedCompanion;
@@ -25,8 +26,97 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _cameraGranted = false;
   bool _storageGranted = false;
+  bool _micGranted = false;
   bool _autoAcceptTransfers = true;
+  bool _checkingUpdate = false;
   final String _downloadPath = 'Download/LinLink';
+
+  Future<void> _checkForUpdates() async {
+    setState(() => _checkingUpdate = true);
+    try {
+      final info = await UpdateService.checkForUpdates();
+      if (!mounted) return;
+      setState(() => _checkingUpdate = false);
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(
+                info.hasUpdate ? Icons.system_update : Icons.check_circle_outline,
+                color: info.hasUpdate ? LinLinkColors.primary : LinLinkColors.secondary,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                info.hasUpdate ? 'Update Available!' : 'Up to Date',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                info.hasUpdate
+                    ? 'A new version (${info.tagName}) of LinLink is available online.'
+                    : 'You are using the latest version of LinLink (v${info.currentVersion}).',
+                style: const TextStyle(fontSize: 13, height: 1.4),
+              ),
+              if (info.hasUpdate && info.releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('What\'s New:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 120),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: LinLinkColors.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      info.releaseNotes,
+                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+            if (info.hasUpdate)
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Downloading update from ${info.htmlUrl}...'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.download, size: 16),
+                label: const Text('Download Update'),
+              ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _checkingUpdate = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to check for updates: $e')),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -37,10 +127,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _checkPermissions() async {
     final camera = await Permission.camera.isGranted;
     final storage = await StorageService.hasStoragePermission();
+    final mic = await Permission.microphone.isGranted;
     if (mounted) {
       setState(() {
         _cameraGranted = camera;
         _storageGranted = storage;
+        _micGranted = mic;
       });
     }
   }
@@ -56,6 +148,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final granted = await StorageService.requestStoragePermission();
     if (mounted) {
       setState(() => _storageGranted = granted);
+    }
+  }
+
+  Future<void> _requestMic() async {
+    final status = await Permission.microphone.request();
+    if (mounted) {
+      setState(() => _micGranted = status.isGranted);
     }
   }
 
@@ -288,7 +387,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       Switch(
                         value: AndroidFileAgent.allowRemoteBrowsing,
-                        onChanged: (val) => setState(() => AndroidFileAgent.allowRemoteBrowsing = val),
+                        onChanged: (val) async {
+                          if (val) {
+                            final granted = await StorageService.requestStoragePermission();
+                            if (mounted) setState(() => _storageGranted = granted);
+                          }
+                          setState(() => AndroidFileAgent.allowRemoteBrowsing = val);
+                        },
                       ),
                     ],
                   ),
@@ -331,9 +436,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(height: 1),
                 _buildPermissionRow(
+                  icon: Icons.mic_none_outlined,
+                  title: 'Microphone Access',
+                  subtitle: 'Required for remote voice calling and audio bridge',
+                  isGranted: _micGranted,
+                  onRequest: _requestMic,
+                ),
+                const Divider(height: 1),
+                _buildPermissionRow(
                   icon: Icons.folder_shared_outlined,
-                  title: 'Storage Access',
-                  subtitle: 'Required for reading and saving transferred files',
+                  title: 'Storage & Files Access',
+                  subtitle: 'Required for remote directory browsing and saving files',
                   isGranted: _storageGranted,
                   onRequest: _requestStorage,
                 ),
@@ -384,6 +497,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(width: 6),
                     Text('Direct TCP & TLS 1.3 socket', style: TextStyle(fontSize: 11, fontFamily: 'monospace', color: LinLinkColors.onSurfaceVariant)),
                   ],
+                ),
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _checkingUpdate ? null : _checkForUpdates,
+                    icon: _checkingUpdate
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh, size: 16),
+                    label: Text(_checkingUpdate ? 'Checking Online...' : 'Check for Online Updates'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
                 ),
               ],
             ),

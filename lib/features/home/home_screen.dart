@@ -3,6 +3,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/linlink_theme.dart';
+import '../call/call_service.dart';
+import '../call/views/call_card.dart';
+import '../call/views/call_screen.dart';
 import '../clipboard/clipboard_service.dart';
 import '../clipboard/clipboard_view.dart';
 import '../pairing/pairing_service.dart';
@@ -41,6 +44,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
     ClipboardService.onClipboardSynced = (text) {
       if (mounted) {
         setState(() => _lastSyncedClipboard = text);
+      }
+    };
+
+    CallService.onIncomingCall = (callerName) {
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => CallScreen(companion: _pairedCompanion, isIncoming: true),
+          ),
+        );
       }
     };
 
@@ -974,7 +987,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
             ],
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+
+          // Remote Calling & PC Audio Bridge
+          CallCard(
+            companion: _pairedCompanion,
+            onRequestPair: _openScanner,
+          ),
+
+          const SizedBox(height: 14),
 
           // Phone to Phone P2P Direct Transfer Card
           Container(
@@ -1318,6 +1339,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
 
           const SizedBox(height: 10),
 
+          // Remote Calling & PC Audio Bridge
+          CallCard(
+            companion: _pairedCompanion,
+            onRequestPair: _openScanner,
+          ),
+
+          const SizedBox(height: 10),
+
           // Privacy Protection Mode Banner
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1350,7 +1379,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                       ),
                       Text(
                         AndroidFileAgent.allowRemoteBrowsing
-                            ? 'Linux can view phone directory tree'
+                            ? 'Linux can view phone directory tree and files'
                             : 'Phone folders hidden from PC. Share files directly from phone.',
                         style: const TextStyle(fontSize: 10, color: LinLinkColors.onSurfaceVariant),
                       ),
@@ -1359,13 +1388,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Si
                 ),
                 Switch(
                   value: AndroidFileAgent.allowRemoteBrowsing,
-                  onChanged: (val) {
+                  onChanged: (val) async {
+                    if (val) {
+                      final granted = await StorageService.requestStoragePermission();
+                      if (!granted && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('⚠️ All Files Access permission is needed to browse all files & folders remotely.'),
+                          ),
+                        );
+                      }
+                    }
                     setState(() => AndroidFileAgent.allowRemoteBrowsing = val);
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
                           val
-                              ? 'Remote directory browsing enabled for Linux'
+                              ? 'Remote directory & file browsing enabled for Linux'
                               : 'Privacy Mode enabled: Linux cannot browse phone directories',
                         ),
                       ),

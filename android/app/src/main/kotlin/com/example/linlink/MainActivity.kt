@@ -50,6 +50,26 @@ class MainActivity : FlutterActivity() {
                 "isServiceRunning" -> {
                     result.success(LinLinkForegroundService.isRunning)
                 }
+                "dialPhoneNumber" -> {
+                    val number = call.argument<String>("phoneNumber") ?: ""
+                    try {
+                        val uri = android.net.Uri.parse("tel:${android.net.Uri.encode(number)}")
+                        val intent = Intent(Intent.ACTION_CALL, uri).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            startActivity(intent)
+                        } catch (e: SecurityException) {
+                            val dialIntent = Intent(Intent.ACTION_DIAL, uri).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(dialIntent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }

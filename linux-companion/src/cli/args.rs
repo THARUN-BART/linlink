@@ -60,6 +60,16 @@ pub enum Commands {
         device: Option<String>,
     },
 
+    /// Start a remote call with your Android phone or dial a phone number (use PC mic to speak & speaker to hear)
+    Call {
+        /// Phone number to dial on your remote phone (e.g. +1234567890 or 9876543210)
+        number: Option<String>,
+
+        /// Optional device name to call
+        #[arg(short, long)]
+        device: Option<String>,
+    },
+
     /// View logs from the background daemon
     Logs {
         /// Number of lines to view
@@ -79,6 +89,29 @@ pub enum Commands {
 
     /// List received files in the LinLink transfers folder
     Files,
+
+    /// Check for and download online updates for LinLink (Linux companion and Android APK)
+    Update {
+        /// Only check if an update is available online without downloading
+        #[arg(short, long)]
+        check: bool,
+
+        /// Force update/reinstall even if currently on latest version
+        #[arg(short, long)]
+        force: bool,
+
+        /// Download the latest Android APK update
+        #[arg(long)]
+        apk: bool,
+
+        /// Skip interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Custom GitHub repository to check (default: THARUN-BART/linlink)
+        #[arg(long, default_value = "THARUN-BART/linlink")]
+        repo: String,
+    },
 
     /// Internal command to run the background daemon server
     #[command(hide = true)]

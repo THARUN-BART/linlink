@@ -74,6 +74,14 @@ pub fn run() {
                 .block_on(crate::cli::shell::run_shell(device));
         }
 
+        Commands::Call { number, device } => {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime")
+                .block_on(crate::cli::call::run_call(number, device));
+        }
+
         Commands::Logs { lines, follow } => {
             run_logs(lines, follow);
         }
@@ -128,6 +136,20 @@ pub fn run() {
                 }
             }
             println!();
+        }
+
+        Commands::Update {
+            check,
+            force,
+            apk,
+            yes,
+            repo,
+        } => {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime")
+                .block_on(crate::cli::update::run_update(check, force, apk, yes, &repo));
         }
 
         Commands::Daemon {

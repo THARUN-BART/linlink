@@ -15,6 +15,27 @@ use tracing::info;
 
 use crate::storage::{current_timestamp, ActiveSession, Storage};
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct CallStateInfo {
+    pub state: String,
+    pub caller: String,
+    pub start_time: Option<u64>,
+    pub mic_muted: bool,
+    pub speaker_enabled: bool,
+}
+
+impl Default for CallStateInfo {
+    fn default() -> Self {
+        Self {
+            state: "idle".to_string(),
+            caller: String::new(),
+            start_time: None,
+            mic_muted: false,
+            speaker_enabled: true,
+        }
+    }
+}
+
 pub struct DaemonServerState {
     pub session_id: String,
     pub host: String,
@@ -25,6 +46,7 @@ pub struct DaemonServerState {
     pub last_synced_clipboard: Arc<Mutex<String>>,
     pub client_ip: Arc<Mutex<Option<String>>>,
     pub agent_port: Arc<Mutex<Option<u16>>>,
+    pub call_state: Arc<Mutex<CallStateInfo>>,
 }
 
 #[derive(Serialize)]
@@ -77,6 +99,21 @@ pub struct FsUploadQuery {
 pub struct DeviceRegisterRequest {
     pub token: String,
     pub agent_port: Option<u16>,
+}
+
+#[derive(Deserialize)]
+pub struct CallActionRequest {
+    pub token: String,
+    pub caller: Option<String>,
+    pub action: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CallControlRequest {
+    pub token: String,
+    pub action: Option<String>,
+    pub is_muted: Option<bool>,
+    pub speaker_enabled: Option<bool>,
 }
 
 async fn handle_status(State(state): State<Arc<DaemonServerState>>) -> Json<DaemonStatusResponse> {
@@ -530,6 +567,117 @@ async fn handle_unlink(
     Ok(Json(serde_json::json!({ "status": "unlinked" })))
 }
 
+async fn handle_call_invite(
+    State(state): State<Arc<DaemonServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(body): Json<CallActionRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    *state.client_ip.lock().await = Some(addr.ip().to_string());
+    let mut call = state.call_state.lock().await;
+    call.state = "in_call".to_string();
+    call.caller = body.caller.unwrap_or_else(|| state.device_name.clone());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    call.start_time = Some(now);
+    info!(
+        "📞 Remote voice call established with '{}' (PC Audio Bridge Active)",
+        state.device_name
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "call_state": "in_call",
+        "message": "Call connected with Linux Companion",
+    })))
+}
+
+async fn handle_call_answer(
+    State(state): State<Arc<DaemonServerState>>,
+    Json(body): Json<CallActionRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let mut call = state.call_state.lock().await;
+    call.state = "in_call".to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    call.start_time = Some(now);
+    info!("📞 Remote call answered with '{}'", state.device_name);
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "call_state": "in_call"
+    })))
+}
+
+async fn handle_call_hangup(
+    State(state): State<Arc<DaemonServerState>>,
+    Json(body): Json<CallActionRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let mut call = state.call_state.lock().await;
+    call.state = "idle".to_string();
+    call.start_time = None;
+    info!("📞 Remote call ended with '{}'", state.device_name);
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "call_state": "ended"
+    })))
+}
+
+async fn handle_call_status(
+    State(state): State<Arc<DaemonServerState>>,
+) -> Json<serde_json::Value> {
+    let call = state.call_state.lock().await;
+    let duration = if let Some(start) = call.start_time {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now.saturating_sub(start)
+    } else {
+        0
+    };
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "call_state": call.state,
+        "caller": call.caller,
+        "duration": duration,
+        "mic_muted": call.mic_muted,
+        "speaker_enabled": call.speaker_enabled,
+        "pc_audio_bridge": "active",
+    }))
+}
+
+async fn handle_call_control(
+    State(state): State<Arc<DaemonServerState>>,
+    Json(body): Json<CallControlRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let mut call = state.call_state.lock().await;
+    if let Some(muted) = body.is_muted {
+        call.mic_muted = muted;
+    }
+    if let Some(spk) = body.speaker_enabled {
+        call.speaker_enabled = spk;
+    }
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
 /// Runs the background daemon server until SIGTERM, SIGINT, or /pair/unlink.
 pub async fn run_daemon_server(
     host: String,
@@ -553,6 +701,7 @@ pub async fn run_daemon_server(
     let last_synced_clipboard = Arc::new(Mutex::new(initial_clip));
     let client_ip_shared = Arc::new(Mutex::new(client_ip.clone()));
     let agent_port_shared = Arc::new(Mutex::new(None));
+    let call_state = Arc::new(Mutex::new(CallStateInfo::default()));
 
     let state = Arc::new(DaemonServerState {
         session_id: session_id.clone(),
@@ -564,6 +713,7 @@ pub async fn run_daemon_server(
         last_synced_clipboard: Arc::clone(&last_synced_clipboard),
         client_ip: Arc::clone(&client_ip_shared),
         agent_port: Arc::clone(&agent_port_shared),
+        call_state: Arc::clone(&call_state),
     });
 
     // Spawn live background clipboard sync worker
@@ -626,6 +776,11 @@ pub async fn run_daemon_server(
         .route("/api/fs/list", post(handle_fs_list))
         .route("/api/fs/download", get(handle_fs_download))
         .route("/api/fs/upload", post(handle_fs_upload))
+        .route("/api/call/invite", post(handle_call_invite))
+        .route("/api/call/answer", post(handle_call_answer))
+        .route("/api/call/hangup", post(handle_call_hangup))
+        .route("/api/call/status", get(handle_call_status))
+        .route("/api/call/control", post(handle_call_control))
         .route("/pair/unlink", post(handle_unlink))
         .layer(axum::extract::DefaultBodyLimit::max(
             10 * 1024 * 1024 * 1024,

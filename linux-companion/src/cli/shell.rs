@@ -221,6 +221,40 @@ pub async fn run_shell(_device_filter: Option<String>) {
                 }
             }
 
+            "call" => {
+                if !args.is_empty() {
+                    let number = args.join("");
+                    crate::cli::call::handle_shell_dial(&client, &base_url, &token, &number).await;
+                } else {
+                    crate::cli::call::handle_shell_call(&client, &base_url, &token, &device_name).await;
+                }
+            }
+
+            "dial" => {
+                if args.is_empty() {
+                    println!("    Usage: dial <phone_number> (e.g. dial +1234567890)");
+                } else {
+                    let number = args.join("");
+                    crate::cli::call::handle_shell_dial(&client, &base_url, &token, &number).await;
+                }
+            }
+
+            "hangup" | "endcall" => {
+                crate::cli::call::handle_shell_hangup(&client, &base_url, &token).await;
+            }
+
+            "call-status" | "callstatus" => {
+                crate::cli::call::handle_shell_call_status(&client, &base_url, &token).await;
+            }
+
+            "update" | "upgrade" => {
+                let check_only = args.iter().any(|a| *a == "--check" || *a == "-c");
+                let force = args.iter().any(|a| *a == "--force" || *a == "-f");
+                let apk = args.iter().any(|a| *a == "--apk" || *a == "-a");
+                let yes = args.iter().any(|a| *a == "-y" || *a == "--yes");
+                crate::cli::update::run_update(check_only, force, apk, yes, "").await;
+            }
+
             other => {
                 println!(
                     "    Unknown command: '{}'. Type 'help' for available commands.",
@@ -557,6 +591,11 @@ fn print_shell_help() {
     println!("  mkdir <folder_name>           Create directory on phone");
     println!("  rm <remote_file>              Delete file on phone");
     println!("  clip [text]                   View or set shared clipboard");
+    println!("  call [phone_number]           Call phone or dial number (use PC mic to speak & speaker to hear)");
+    println!("  dial <phone_number>           Dial a friend's phone number on phone remotely");
+    println!("  hangup                        Hang up active call");
+    println!("  call-status                   View active calling & audio bridge status");
+    println!("  update [--check/--apk/--force] Check for and download updates online");
     println!("  clear                         Clear the terminal screen");
     println!("  exit, quit                    Exit interactive shell");
     println!();
