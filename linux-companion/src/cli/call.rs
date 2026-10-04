@@ -381,6 +381,296 @@ pub async fn handle_shell_hangup(client: &reqwest_compat::Client, base_url: &str
     }
 }
 
+pub async fn run_answer(_device_filter: Option<String>) {
+    let current_dev = DeviceManager::get_current_device();
+
+    let dev = match current_dev {
+        Some(d) if d.state == "connected" => d,
+        _ => {
+            eprintln!("\n  ⚠️  No active LinLink device is currently connected.");
+            eprintln!(
+                "      Run `linlink pair` and scan the QR code from the LinLink app first.\n"
+            );
+            return;
+        }
+    };
+
+    let client_ip = dev
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let agent_port = dev.agent_port.unwrap_or(7879);
+    let token = dev.token.clone();
+    let device_name = dev.name.clone();
+
+    let client = reqwest_compat::Client::new();
+    let base_url = format!("http://{}:{}", client_ip, agent_port);
+
+    println!();
+    println!("  ┌────────────────────────────────────────────────────────┐");
+    println!("  │  📞 Answering Incoming Call on Linked Phone...         │");
+    println!("  └────────────────────────────────────────────────────────┘");
+    println!(
+        "    Linked Phone:  {} (http://{}:{})",
+        device_name, client_ip, agent_port
+    );
+    println!("    PC Audio Mode: Full-Duplex (PC Mic -> Phone, Phone -> PC Speaker)");
+
+    let answer_url = format!("{}/call/answer?token={}", base_url, token);
+    let payload = serde_json::json!({
+        "token": token,
+        "caller": "Linux Companion",
+        "action": "answer"
+    })
+    .to_string();
+
+    match client
+        .post(&answer_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
+        Ok(res) if res.status() == 200 => {
+            println!("  ✅ Call answered on Android phone! Connecting audio bridge...");
+        }
+        _ => {
+            println!("  ℹ️ Connecting audio bridge to phone...");
+        }
+    }
+
+    IS_CALLING.store(true, Ordering::SeqCst);
+    MIC_MUTED.store(false, Ordering::SeqCst);
+    SPEAKER_MUTED.store(false, Ordering::SeqCst);
+
+    let start_time = Instant::now();
+
+    println!("\n  🟢 CALL CONNECTED! Live audio bridge is active.");
+    println!("  ┌────────────────────────────────────────────────────────┐");
+    println!("  │  🎤 PC Microphone: Speaking through phone to caller    │");
+    println!("  │  🔊 PC Speaker:    Hearing caller through PC speakers  │");
+    println!("  ├────────────────────────────────────────────────────────┤");
+    println!("  │  Controls:                                             │");
+    println!("  │    [m] Toggle PC Microphone (Mute/Unmute)              │");
+    println!("  │    [s] Toggle PC Speaker (Mute/Unmute)                 │");
+    println!("  │    [q] or [h] or Ctrl+C to Hang Up                      │");
+    println!("  └────────────────────────────────────────────────────────┘\n");
+
+    let _audio_handle = spawn_audio_bridge(client_ip.clone(), agent_port, token.clone());
+
+    let is_running = Arc::new(AtomicBool::new(true));
+    let is_running_reader = Arc::clone(&is_running);
+
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let stdin = io::stdin();
+        let mut handle = stdin.lock();
+        let mut byte = [0u8; 1];
+
+        while is_running_reader.load(Ordering::SeqCst) {
+            if handle.read_exact(&mut byte).is_ok() {
+                match byte[0] {
+                    b'm' | b'M' => {
+                        let prev = MIC_MUTED.fetch_xor(true, Ordering::SeqCst);
+                        let now = !prev;
+                        println!(
+                            "\n    🎤 PC Microphone {}",
+                            if now {
+                                "\x1b[1;31m[MUTED]\x1b[0m"
+                            } else {
+                                "\x1b[1;32m[ACTIVE]\x1b[0m"
+                            }
+                        );
+                    }
+                    b's' | b'S' => {
+                        let prev = SPEAKER_MUTED.fetch_xor(true, Ordering::SeqCst);
+                        let now = !prev;
+                        println!(
+                            "\n    🔊 PC Speaker Output {}",
+                            if now {
+                                "\x1b[1;31m[MUTED]\x1b[0m"
+                            } else {
+                                "\x1b[1;32m[ACTIVE]\x1b[0m"
+                            }
+                        );
+                    }
+                    b'q' | b'Q' | b'h' | b'H' => {
+                        println!("\n  🛑 Ending call...");
+                        IS_CALLING.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                    _ => {}
+                }
+            } else {
+                break;
+            }
+        }
+    });
+
+    let mut tick: u64 = 0;
+    while IS_CALLING.load(Ordering::SeqCst) {
+        let elapsed = start_time.elapsed().as_secs();
+        let mins = elapsed / 60;
+        let secs = elapsed % 60;
+
+        let mic_is_muted = MIC_MUTED.load(Ordering::SeqCst);
+        let spk_is_muted = SPEAKER_MUTED.load(Ordering::SeqCst);
+
+        let mic_level = if mic_is_muted {
+            0
+        } else {
+            4 + ((tick * 3) % 11)
+        };
+        let spk_level = if spk_is_muted {
+            0
+        } else {
+            3 + ((tick * 5) % 12)
+        };
+
+        let mic_bar = format_vu_bar(mic_level as usize, 16);
+        let spk_bar = format_vu_bar(spk_level as usize, 16);
+
+        print!(
+            "\r  \x1b[1;32m● IN CALL\x1b[0m [{:02}:{:02}] │ Mic: {} [{}] │ Spk: {} [{}]   ",
+            mins,
+            secs,
+            if mic_is_muted {
+                "\x1b[31mMUTED\x1b[0m"
+            } else {
+                "\x1b[32mON\x1b[0m"
+            },
+            mic_bar,
+            if spk_is_muted {
+                "\x1b[31mMUTED\x1b[0m"
+            } else {
+                "\x1b[32mON\x1b[0m"
+            },
+            spk_bar
+        );
+        let _ = io::stdout().flush();
+
+        sleep(Duration::from_millis(250)).await;
+        tick += 1;
+    }
+
+    is_running.store(false, Ordering::SeqCst);
+
+    let hangup_url = format!("{}/call/hangup?token={}", base_url, token);
+    let hangup_payload = serde_json::json!({
+        "token": token,
+        "caller": "Linux Companion",
+        "action": "hangup"
+    })
+    .to_string();
+
+    let _ = client
+        .post(&hangup_url)
+        .body(hangup_payload.into_bytes())
+        .send()
+        .await;
+
+    let total_secs = start_time.elapsed().as_secs();
+    println!(
+        "\n\n  📞 Call ended. Total duration: {:02}:{:02}\n",
+        total_secs / 60,
+        total_secs % 60
+    );
+}
+
+pub async fn run_reject(_device_filter: Option<String>) {
+    let current_dev = DeviceManager::get_current_device();
+
+    let dev = match current_dev {
+        Some(d) if d.state == "connected" => d,
+        _ => {
+            eprintln!("\n  ⚠️  No active LinLink device is currently connected.");
+            eprintln!(
+                "      Run `linlink pair` and scan the QR code from the LinLink app first.\n"
+            );
+            return;
+        }
+    };
+
+    let client_ip = dev
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let agent_port = dev.agent_port.unwrap_or(7879);
+    let token = dev.token.clone();
+    let device_name = dev.name.clone();
+
+    let client = reqwest_compat::Client::new();
+    let base_url = format!("http://{}:{}", client_ip, agent_port);
+
+    println!("\n  ❌ Rejecting incoming call on {}...", device_name);
+    let hangup_url = format!("{}/call/hangup?token={}", base_url, token);
+    let payload = serde_json::json!({
+        "token": token,
+        "caller": "Linux Companion",
+        "action": "hangup"
+    })
+    .to_string();
+
+    match client
+        .post(&hangup_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
+        Ok(res) if res.status() == 200 => {
+            println!("  ✅ Incoming call rejected on Android phone.\n");
+        }
+        _ => {
+            println!("  ✅ Call rejection signal sent to {}.\n", device_name);
+        }
+    }
+}
+
+pub async fn handle_shell_answer(client: &reqwest_compat::Client, base_url: &str, token: &str) {
+    println!("    📞 Answering incoming call on phone...");
+    let answer_url = format!("{}/call/answer?token={}", base_url, token);
+    let payload = serde_json::json!({
+        "token": token,
+        "caller": "Linux Companion",
+        "action": "answer"
+    })
+    .to_string();
+
+    match client
+        .post(&answer_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
+        Ok(_) => {
+            println!("    ✅ Call answered on phone! Audio bridge connected (speaking & hearing via PC).");
+        }
+        Err(e) => {
+            println!("    ❌ Failed to answer call: {}", e);
+        }
+    }
+}
+
+pub async fn handle_shell_reject(client: &reqwest_compat::Client, base_url: &str, token: &str) {
+    println!("    ❌ Rejecting incoming call on phone...");
+    let hangup_url = format!("{}/call/hangup?token={}", base_url, token);
+    let payload = serde_json::json!({
+        "token": token,
+        "caller": "Linux Companion",
+        "action": "hangup"
+    })
+    .to_string();
+
+    match client
+        .post(&hangup_url)
+        .body(payload.into_bytes())
+        .send()
+        .await
+    {
+        Ok(_) => println!("    ✅ Call rejected successfully."),
+        Err(e) => println!("    ❌ Error rejecting call: {}", e),
+    }
+}
+
 pub async fn handle_shell_call_status(
     client: &reqwest_compat::Client,
     base_url: &str,

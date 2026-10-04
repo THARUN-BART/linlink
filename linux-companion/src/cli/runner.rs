@@ -82,6 +82,22 @@ pub fn run() {
                 .block_on(crate::cli::call::run_call(number, device));
         }
 
+        Commands::Answer { device } => {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime")
+                .block_on(crate::cli::call::run_answer(device));
+        }
+
+        Commands::Reject { device } => {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime")
+                .block_on(crate::cli::call::run_reject(device));
+        }
+
         Commands::Logs { lines, follow } => {
             run_logs(lines, follow);
         }

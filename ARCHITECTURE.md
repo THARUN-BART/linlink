@@ -111,7 +111,9 @@ The Linux companion is written in asynchronous Rust (Tokio + Axum) under `linux-
 
 ## 🔄 Protocol Flows
 
-### 1. Remote Phone Dialing & Call Bridge Protocol
+### 1. Remote Phone Calling & Audio Bridge Protocol
+
+#### Outgoing Call Flow:
 ```
 Linux Companion CLI                               Android Device (Agent)
         │                                                │
@@ -128,6 +130,27 @@ Linux Companion CLI                               Android Device (Agent)
         │                                                │
         │  5. Hangup: POST /call/hangup                  │
         │───────────────────────────────────────────────>│  6. Terminates call session
+```
+
+#### Incoming Call & Laptop Answer Flow:
+```
+Linux Companion (Laptop)                          Android Phone (Cellular Network)
+        │                                                │
+        │                                                │  1. Incoming cellular call ringing
+        │                                                │     PhoneCallReceiver catches event
+        │  2. POST /api/call/incoming {caller, ringing}   │
+        │<───────────────────────────────────────────────│
+        │  Desktop notification shown on Laptop          │
+        │                                                │
+        │  3. User runs `linlink answer` / shell `a`     │
+        │  POST /call/answer                             │
+        │───────────────────────────────────────────────>│  4. TelecomManager.acceptRingingCall()
+        │                                                │     Natively answers phone call
+        │  5. Full-duplex PC Audio Bridge Connected      │
+        │<══════════════════════════════════════════════>│  (PC Mic -> Phone, Phone -> PC Spk)
+        │                                                │
+        │  6. Hangup: POST /call/hangup                  │  7. TelecomManager.endCall()
+        │───────────────────────────────────────────────>│     Natively ends call
 ```
 
 ---

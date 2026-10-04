@@ -70,6 +70,20 @@ pub enum Commands {
         device: Option<String>,
     },
 
+    /// Answer an incoming call on your Android phone and attend using PC mic & speaker
+    Answer {
+        /// Optional device name to answer
+        #[arg(short, long)]
+        device: Option<String>,
+    },
+
+    /// Reject / decline an incoming call on your Android phone
+    Reject {
+        /// Optional device name to reject
+        #[arg(short, long)]
+        device: Option<String>,
+    },
+
     /// View logs from the background daemon
     Logs {
         /// Number of lines to view

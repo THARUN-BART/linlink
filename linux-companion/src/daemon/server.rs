@@ -116,6 +116,14 @@ pub struct CallControlRequest {
     pub speaker_enabled: Option<bool>,
 }
 
+#[derive(Deserialize)]
+pub struct CallIncomingRequest {
+    pub token: String,
+    pub caller: Option<String>,
+    pub number: Option<String>,
+    pub state: Option<String>,
+}
+
 async fn handle_status(State(state): State<Arc<DaemonServerState>>) -> Json<DaemonStatusResponse> {
     Json(DaemonStatusResponse {
         status: "ok".to_string(),
@@ -678,6 +686,75 @@ async fn handle_call_control(
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
+pub fn send_desktop_notification(title: &str, body: &str) {
+    use std::process::Command;
+    let _ = Command::new("notify-send")
+        .args([
+            "-a",
+            "LinLink",
+            "-u",
+            "critical",
+            "-i",
+            "call-start",
+            title,
+            body,
+        ])
+        .spawn();
+}
+
+async fn handle_call_incoming(
+    State(state): State<Arc<DaemonServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(body): Json<CallIncomingRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.token != state.token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    *state.client_ip.lock().await = Some(addr.ip().to_string());
+    let incoming_state = body.state.unwrap_or_else(|| "ringing".to_string());
+    let caller_name = body
+        .caller
+        .or(body.number)
+        .unwrap_or_else(|| "Incoming Caller".to_string());
+
+    let mut call = state.call_state.lock().await;
+    match incoming_state.as_str() {
+        "ringing" => {
+            call.state = "ringing".to_string();
+            call.caller = caller_name.clone();
+            info!(
+                "📞 Incoming phone call ringing on Android from '{}'",
+                caller_name
+            );
+            send_desktop_notification(
+                &format!("📞 Incoming Call: {}", caller_name),
+                "Run 'linlink answer' or press 'a' in LinLink shell to attend on PC",
+            );
+        }
+        "offhook" | "in_call" => {
+            call.state = "in_call".to_string();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            call.start_time = Some(now);
+            info!("📞 Call active with '{}'", caller_name);
+        }
+        "idle" | "ended" => {
+            call.state = "idle".to_string();
+            call.start_time = None;
+            info!("📞 Call ended / idle with '{}'", caller_name);
+        }
+        _ => {}
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "call_state": call.state,
+        "caller": call.caller,
+    })))
+}
+
 /// Runs the background daemon server until SIGTERM, SIGINT, or /pair/unlink.
 pub async fn run_daemon_server(
     host: String,
@@ -777,6 +854,7 @@ pub async fn run_daemon_server(
         .route("/api/fs/download", get(handle_fs_download))
         .route("/api/fs/upload", post(handle_fs_upload))
         .route("/api/call/invite", post(handle_call_invite))
+        .route("/api/call/incoming", post(handle_call_incoming))
         .route("/api/call/answer", post(handle_call_answer))
         .route("/api/call/hangup", post(handle_call_hangup))
         .route("/api/call/status", get(handle_call_status))

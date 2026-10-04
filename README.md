@@ -243,6 +243,8 @@ flutter build apk --release --target-platform android-arm,android-arm64,android-
 | `linlink pair --foreground` | Run pairing server in foreground for debugging |
 | `linlink pair --host <IP>` | Specify custom LAN IP for the QR payload |
 | `linlink call [NUMBER]` | Start a remote voice call or dial a phone number with PC Mic & Speaker |
+| `linlink answer` | Answer an incoming phone call and attend directly on your laptop |
+| `linlink reject` | Decline / reject an incoming phone call from your laptop |
 | `linlink update` | Check online repository and download/install latest software update |
 | `linlink update --check` | Check if an online update is available without downloading |
 | `linlink update --apk` | Download the latest Android APK update file |
@@ -267,6 +269,8 @@ flutter build apk --release --target-platform android-arm,android-arm64,android-
 | `cat <file>` | Print remote text file contents in terminal |
 | `call [phone_number]` | Call phone or dial number (use PC mic to speak & speaker to hear) |
 | `dial <phone_number>` | Dial a friend's phone number on phone remotely |
+| `answer` / `a` | Answer incoming phone call and attend via PC mic & speaker |
+| `reject` / `r` | Reject / decline incoming phone call |
 | `hangup` | Hang up active call |
 | `call-status` | View active calling & audio bridge status |
 | `update` | Check and download online updates |

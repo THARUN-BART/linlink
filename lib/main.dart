@@ -4,6 +4,7 @@ import 'package:file_picker_linux/file_picker_linux.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'features/call/call_service.dart';
 import 'features/home/home_screen.dart';
 import 'theme/linlink_theme.dart';
 
@@ -20,6 +21,9 @@ Future<void> main() async {
       FilePickerLinux.registerWith();
     } catch (_) {}
   }
+
+  // Initialize native telephony call receiver
+  CallService.initMethodChannel();
 
   // Request camera permission on startup before accessing camera services
   await Permission.camera.request();

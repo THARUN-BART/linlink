@@ -46,4 +46,44 @@ async fn test_daemon_call_state() {
         assert_eq!(c.state, "in_call");
         assert_eq!(c.caller, "Pixel 8");
     }
+
+    // Simulate incoming ringing call state
+    {
+        let mut c = state.call_state.lock().await;
+        c.state = "ringing".to_string();
+        c.caller = "+1234567890".to_string();
+        c.start_time = None;
+    }
+
+    {
+        let c = state.call_state.lock().await;
+        assert_eq!(c.state, "ringing");
+        assert_eq!(c.caller, "+1234567890");
+    }
+
+    // Simulate answering on Linux (transition to in_call)
+    {
+        let mut c = state.call_state.lock().await;
+        c.state = "in_call".to_string();
+        c.start_time = Some(200);
+    }
+
+    {
+        let c = state.call_state.lock().await;
+        assert_eq!(c.state, "in_call");
+        assert_eq!(c.start_time, Some(200));
+    }
+
+    // Simulate reject/hangup
+    {
+        let mut c = state.call_state.lock().await;
+        c.state = "idle".to_string();
+        c.start_time = None;
+    }
+
+    {
+        let c = state.call_state.lock().await;
+        assert_eq!(c.state, "idle");
+        assert_eq!(c.start_time, None);
+    }
 }

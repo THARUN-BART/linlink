@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _cameraGranted = false;
   bool _storageGranted = false;
   bool _micGranted = false;
+  bool _phoneGranted = false;
   bool _autoAcceptTransfers = true;
   bool _checkingUpdate = false;
   final String _downloadPath = 'Download/LinLink';
@@ -128,11 +129,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final camera = await Permission.camera.isGranted;
     final storage = await StorageService.hasStoragePermission();
     final mic = await Permission.microphone.isGranted;
+    final phone = await Permission.phone.isGranted;
     if (mounted) {
       setState(() {
         _cameraGranted = camera;
         _storageGranted = storage;
         _micGranted = mic;
+        _phoneGranted = phone;
       });
     }
   }
@@ -155,6 +158,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final status = await Permission.microphone.request();
     if (mounted) {
       setState(() => _micGranted = status.isGranted);
+    }
+  }
+
+  Future<void> _requestPhone() async {
+    final status = await Permission.phone.request();
+    if (mounted) {
+      setState(() => _phoneGranted = status.isGranted);
     }
   }
 
@@ -441,6 +451,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: 'Required for remote voice calling and audio bridge',
                   isGranted: _micGranted,
                   onRequest: _requestMic,
+                ),
+                const Divider(height: 1),
+                _buildPermissionRow(
+                  icon: Icons.phone_in_talk_outlined,
+                  title: 'Phone & Calling Access',
+                  subtitle: 'Required for directly placing cellular phone calls from Linux',
+                  isGranted: _phoneGranted,
+                  onRequest: _requestPhone,
                 ),
                 const Divider(height: 1),
                 _buildPermissionRow(

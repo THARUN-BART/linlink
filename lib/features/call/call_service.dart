@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../pairing/pairing_service.dart';
 
 enum CallState {
@@ -40,6 +41,49 @@ class CallService {
   static Timer? _callTimer;
   static Timer? _audioLevelTimer;
   static final HttpClient _httpClient = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+
+  /// Initialize MethodChannel listener for native Android telephony events
+  static void initMethodChannel() {
+    if (!Platform.isAndroid) return;
+    const channel = MethodChannel('com.example.linlink/foreground_service');
+    channel.setMethodCallHandler((call) async {
+      if (call.method == 'onPhoneCallStateChanged') {
+        final state = call.arguments['state']?.toString() ?? 'idle';
+        final number = call.arguments['number']?.toString() ?? 'Incoming Caller';
+
+        if (state == 'ringing') {
+          handleIncomingCall(callerName: number);
+          notifyLinuxOfIncomingCall(number);
+        } else if (state == 'in_call') {
+          _connectCall();
+        } else if (state == 'idle') {
+          _endCallInternal();
+        }
+      }
+    });
+  }
+
+  static Future<void> notifyLinuxOfIncomingCall(String number) async {
+    if (remoteHost != null && remoteToken != null) {
+      try {
+        final uri = Uri.parse('http://$remoteHost:$remotePort/api/call/incoming');
+        final req = await _httpClient.postUrl(uri);
+        req.headers.contentType = ContentType.json;
+        final payload = jsonEncode({
+          'token': remoteToken,
+          'caller': number,
+          'number': number,
+          'state': 'ringing',
+        });
+        final bytes = utf8.encode(payload);
+        req.contentLength = bytes.length;
+        req.add(bytes);
+        await req.close();
+      } catch (e) {
+        debugPrint('Could not notify Linux of incoming call: $e');
+      }
+    }
+  }
 
   /// Callback when an incoming call arrives from Linux
   static void Function(String callerName)? onIncomingCall;
@@ -85,6 +129,9 @@ class CallService {
 
     if (Platform.isAndroid) {
       try {
+        if (!await Permission.phone.isGranted) {
+          await Permission.phone.request();
+        }
         const channel = MethodChannel('com.example.linlink/foreground_service');
         await channel.invokeMethod('dialPhoneNumber', {'phoneNumber': cleanNumber});
       } catch (e) {
@@ -202,9 +249,18 @@ class CallService {
     onIncomingCall?.call(callerName);
   }
 
-  /// Answer incoming call from Linux Companion
+  /// Answer incoming call from Linux Companion or mobile
   static Future<void> answerCall() async {
     if (_state != CallState.ringing && _state != CallState.calling) return;
+
+    if (Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('com.example.linlink/foreground_service');
+        await channel.invokeMethod('answerPhoneCall');
+      } catch (e) {
+        debugPrint('Error answering call via native intent: $e');
+      }
+    }
 
     if (remoteHost != null && remoteToken != null) {
       try {
@@ -245,6 +301,15 @@ class CallService {
   /// End active or ringing call
   static Future<void> hangup() async {
     if (_state == CallState.idle) return;
+
+    if (Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('com.example.linlink/foreground_service');
+        await channel.invokeMethod('rejectPhoneCall');
+      } catch (e) {
+        debugPrint('Error rejecting call via native intent: $e');
+      }
+    }
 
     if (remoteHost != null && remoteToken != null) {
       try {

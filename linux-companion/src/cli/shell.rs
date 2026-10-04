@@ -240,6 +240,14 @@ pub async fn run_shell(_device_filter: Option<String>) {
                 }
             }
 
+            "answer" | "a" => {
+                crate::cli::call::handle_shell_answer(&client, &base_url, &token).await;
+            }
+
+            "reject" | "r" => {
+                crate::cli::call::handle_shell_reject(&client, &base_url, &token).await;
+            }
+
             "hangup" | "endcall" => {
                 crate::cli::call::handle_shell_hangup(&client, &base_url, &token).await;
             }
@@ -594,6 +602,8 @@ fn print_shell_help() {
     println!("  clip [text]                   View or set shared clipboard");
     println!("  call [phone_number]           Call phone or dial number (use PC mic to speak & speaker to hear)");
     println!("  dial <phone_number>           Dial a friend's phone number on phone remotely");
+    println!("  answer, a                     Answer incoming phone call (use PC mic & speaker)");
+    println!("  reject, r                     Reject / decline incoming phone call");
     println!("  hangup                        Hang up active call");
     println!("  call-status                   View active calling & audio bridge status");
     println!("  update [--check/--apk/--force] Check for and download updates online");
